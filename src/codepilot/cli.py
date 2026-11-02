@@ -57,5 +57,9 @@ def main() -> int:
         print("Request or cleanup timed out", file=sys.stderr)
         return 1
     except (OSError, ProtocolError, RemoteError, RuntimeError) as exc:
-        print(f"{args.command} failed: {exc}", file=sys.stderr)
+        print(f"{args.command} failed at {settings.host}:{settings.port}: {exc}", file=sys.stderr)
         return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

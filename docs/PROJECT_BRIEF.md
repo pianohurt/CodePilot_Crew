@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-状态：启动设计已整理，S0 尚未实现。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均保留 codepilot（用户于 2026-11-02 确认）。展示名使用 CodePilot Crew。
+状态：S0 已实现并完成本机 Windows 验收，后续阶段未开始；具体证据与限制见 PROGRESS 和 S0_VALIDATION。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均保留 codepilot（用户于 2026-11-02 确认）。展示名使用 CodePilot Crew。
 
 ## 用户与目的
 
@@ -25,7 +25,7 @@ Python 3.12、asyncio、Pydantic、Anthropic Messages API 兼容接口、Textual
 
 最开始确定顶层组织、模块职责、依赖方向和关键数据边界。当前阶段只创建必要目录与文件；具体类、函数、字段随实现逐步确定。
 
-S0 完成后的预期轮廓如下，文件职责、接口和验收案例见 [S0_DESIGN.md](S0_DESIGN.md)。这是待实施结构，本轮未创建源码骨架：
+S0 的目录轮廓如下，文件职责、接口和验收案例见 [S0_DESIGN.md](S0_DESIGN.md)。仅创建当前需要的模块，实际结果见 [S0_VALIDATION.md](S0_VALIDATION.md)：
 
 ```text
 CodePilot_Crew/

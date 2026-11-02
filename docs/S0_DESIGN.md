@@ -1,6 +1,6 @@
 # S0 启动设计：工程骨架与通信
 
-日期：2026-11-02。状态：设计已整理，等待用户指定实施；本文中的结构、命令输出和案例均为计划，未实现、未验收。
+日期：2026-11-02。状态：S0 已实施并完成本机 Windows 验收。本文保留设计与验收规格，实际运行结果和未验证项见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
 
 ## 1. 已确定的目标、命名与边界
 
@@ -10,22 +10,22 @@
 | 独立工作目录 | G:/实习项目/CodePilot_Crew（已存在） |
 | Python 包 / 命令 | codepilot / codepilot，按用户选择保留 |
 | 本地发行包名 | codepilot；仅用于当前项目安装，不代表名称可在 PyPI 发布 |
-| Git | 从本目录建立新历史，不导入旧 .git；当前未初始化、无提交或标签 |
+| Git | 从本目录建立新历史，不导入旧 .git；main 分支，stage-0 定位本机验收提交 |
 | 远端 | 尚未创建，地址待定；后续创建时先私有，不在本轮发布 |
 
 能力目标以 PROJECT_BRIEF 的四条主线为准：Agent 循环与工具调用；多 Agent 编排；上下文压缩与流式重试；MCP 与 Skills。S0 为这些能力提供启动和通信基础，本阶段完成不代表 Agent 已能执行任务。
 
 技术方向保留 Python 3.12、asyncio、Pydantic、Anthropic 兼容接口、Textual、pytest、uv；S0 只引入实际需要的部分。运行依赖先用 Pydantic，命令解析、网络和日志优先用标准库；开发依赖为 pytest 与必要的异步测试支持。模型 SDK 在 S1、Textual 在 S2 再加入。
 
-Windows 原生可运行是必验条件，Linux 尽量兼容。2026-11-02 的检查只确认默认 `python` 为 3.9.12、uv 为 0.12.15、Git 为 2.54.0.windows.1；尚未检查 uv 是否另有 Python 3.12。实施时选用 Python 3.12 并生成独立虚拟环境，不复用旧项目环境，不更改系统默认 Python。
+Windows 原生可运行是必验条件，Linux 尽量兼容。实施时确认已有独立 CPython 3.12.14，并用它生成项目环境；系统默认 Python 仍为 3.9.12，uv 为 0.12.15、Git 为 2.54.0.windows.1。未复用旧项目环境或更改系统默认 Python。
 
-本轮只更新设计与交接文档。S0 实施包括：可安装包、最小配置、日志入口、本地 TCP 通信、core/ping/version、错误处理、退出清理、离线测试及最小 CI。
+S0 范围包括：可安装包、最小配置、日志入口、本地 TCP 通信、core/ping/version、错误处理、退出清理、离线测试及最小 CI。
 
 S1 及以后再创建 agent、tools、tui、session、compact、subagents、mcp、skills 等模块。本轮不生成这些空目录，不实现 Provider、工具执行、事件总线、审批、持久化或多 Agent。S0 也不做自动拉起后台、系统服务安装、远程访问或自动重连。
 
 ## 2. S0 必需目录与模块职责
 
-以下是 S0 实施后的最小结构；本轮实际新增的只有本文档，其他文档同步更新。
+以下结构已在 S0 实施，另增加 scripts/verify_windows_ctrl_c.py 和验收、调用链说明文档。没有创建后续能力的空实现。
 
 ```text
 CodePilot_Crew/
@@ -87,13 +87,15 @@ CLI 可以读取配置；Core 装配配置、日志和传输。协议只描述�
 | `uv run codepilot ping` | 连接已有 Core，调用 core.ping；stdout 输出 `pong`；不自动启动服务 |
 | `uv run codepilot version` | 从已安装包元数据输出 `codepilot 0.1.0`；Core 离线也能成功 |
 
-S0 初始版本拟为 0.1.0，以实施时 pyproject.toml 的包元数据为唯一版本来源；ping 的 server_version 读取同一来源，避免手工维护多份版本号。新项目代码通过本目录内 `uv run` 执行，避免命中机器上其他同名命令。
+S0 初始版本为 0.1.0，以 pyproject.toml 的包元数据为唯一版本来源；ping 的 server_version 读取同一来源，避免手工维护多份版本号。新项目代码通过本目录内 `uv run` 执行，避免命中机器上其他同名命令。
 
-Core 和 ping 支持 `--port`；ping 支持 `--timeout`；Core 支持 `--log-level`。对应环境变量拟为 `CODEPILOT_CREW_PORT`、`CODEPILOT_CREW_TIMEOUT`、`CODEPILOT_CREW_LOG_LEVEL`。优先级为显式参数 > 对应环境变量 > 默认值；不读取旧 KAMA 配置或旧 .env。配置模型只负责把最终配置校验为合法值。
+Core 和 ping 支持 `--port`；ping 支持 `--timeout`；Core 支持 `--log-level`。对应环境变量为 `CODEPILOT_CREW_PORT`、`CODEPILOT_CREW_TIMEOUT`、`CODEPILOT_CREW_LOG_LEVEL`。优先级为显式参数 > 对应环境变量 > 默认值；不读取旧 KAMA 配置或旧 .env。配置模型只负责把最终配置校验为合法值。
 
 监听地址在 S0 固定为 `127.0.0.1`；默认端口 7438（旧参考协议使用 7437，7438 不保证空闲）。正常端口范围 1—65535；仅测试内部允许使用 0，让操作系统分配空闲端口。客户端一次调用的总等待预算默认 5 秒，包含连接、发送和接收，超时必须是有限正数；日志级别默认 INFO。无效配置在监听或连接之前失败。
 
 正常命令返回 0；连接、超时、远端错误或异常关闭返回 1；命令参数/配置错误返回 2。Core 经 Ctrl+C 完成正常清理返回 0。普通结果走 stdout，诊断和服务日志走 stderr，不把堆栈直接作为协议响应。
+
+实施时明确：客户端的请求等待预算之外，连接收尾另有最多 1 秒预算；服务整体关闭预算为 5 秒。请求成功不等于允许无界等待连接关闭。
 
 ### 3.2 传输与数据边界
 
@@ -153,13 +155,13 @@ Core 状态为启动中 → 监听中 → 停止中 → 已停止；配置错误
 
 Core 拥有监听 socket、客户端连接和连接处理任务。关闭顺序为：停止接受连接 → 关闭现有连接 → 取消并等待剩余处理任务 → 确认监听关闭。整体清理预算先定 5 秒，未正常清理要记为失败；不吞掉所有异常后声称退出成功。
 
-使用跨平台的主入口取消与 finally 清理设计；不把 Unix 专用信号注册作为必要条件。Windows PowerShell 中真实按 Ctrl+C、端口释放与重启必须单独验证；自动测试调用关闭流程不能替代这项证据。S0 没有模型调用或工具子进程需要恢复。
+使用跨平台的主入口取消与 finally 清理设计；不把 Unix 专用信号注册作为必要条件。Windows 控制台的真实 CTRL_C_EVENT、端口释放与重启必须单独验证；直接调用关闭方法不能替代这项证据。实施时由独立隐藏控制台自动发送该事件验证，人工键盘演示未执行，详见验收记录。S0 没有模型调用或工具子进程需要恢复。
 
 日志至少能定位监听地址、连接建立/结束、请求 id 和 method、失败类别、关闭结果。先用标准 logging 写 stderr，不在 S0 引入事件存储、模型 Trace 或会话日志体系。
 
 ## 4. 验收案例与证据
 
-以下均为待执行案例，不能引用旧 CodePilot 的测试成绩。实现时根据行为写测试，不以私有函数调用次数或“文件已存在”作为完成依据。
+以下是验收规格，逐项实际结果见 S0_VALIDATION，不能引用旧 CodePilot 的测试成绩。不以私有函数调用次数或“文件已存在”作为完成依据。
 
 | 编号 | 触发方式 | 预期可观察结果 | 验证层次 |
 |---|---|---|---|
@@ -174,7 +176,7 @@ Core 拥有监听 socket、客户端连接和连接处理任务。关闭顺序�
 | A9 | Core 离线、连接中断、模拟服务不回应或返回错误 id | 客户端有界失败并关闭连接，退出码 1；错误 id 不被接纳 | CLI + 受控 TCP 对端 |
 | A10 | 同一端口启动第二个 Core；传入非法端口/超时 | 端口占用返回 1；配置错误返回 2；原服务仍可 ping | CLI 子进程 |
 | A11 | 保留一个客户端连接，正常关闭 Core，再在同端口启动 | 连接与任务结束；端口可重新绑定；新 Core 能 ping | 生命周期集成 |
-| A12 | Windows PowerShell 中启动 Core、ping、按 Ctrl+C、同端口重启并 ping | 5 秒内正常退出，退出码 0；重启成功且没有旧服务残留 | Windows 人工演示 |
+| A12 | Windows 独立控制台启动 Core、ping、发送真实 Ctrl+C 事件、同端口重启并 ping | 5 秒内正常退出，退出码 0；重启成功且没有旧服务残留 | Windows 控制台自动化；人工演示单列 |
 | A13 | 从独立环境运行最小 CI 流程 | Python 3.12 的 Windows/Linux 离线行为测试通过 | 本地复现 + 后续远端 CI |
 
 拟执行的核心命令为 `uv sync --locked`、`uv run --locked pytest -q`，以及上表的 core/ping/version 手动演示。锁文件先在实施中生成，再使用 --locked 校验可复现性。CI 的依赖安装可访问包源；“离线测试”指测试过程不依赖模型或外部服务。没有远端 CI 实际结果时，不以工作流文件存在宣称通过。
@@ -187,7 +189,7 @@ Core 拥有监听 socket、客户端连接和连接处理任务。关闭顺序�
 
 ## 5. 第一阶段的提交节点
 
-第一阶段指 S0。以下是建议节点，不是已经发生的提交；本轮未初始化 Git、commit、tag 或 push。具体提交仍遵循当次授权，不为了凑数量拆分空改动。
+第一阶段指 S0。以下节点已按实际内容推进：C0 1198160、C1 aab1775、C2 028c640；C3 由 stage-0 定位。无 push 或远端；提交内容不包含环境、密钥或运行产物。
 
 | 节点 | 建议提交信息 | 提交时应已有的内容与证据 |
 |---|---|---|
@@ -208,10 +210,10 @@ Core 拥有监听 socket、客户端连接和连接处理任务。关闭顺序�
 
 实现后的讲解围绕这一个请求和实际新增函数展开，说明为什么选择按行分帧、为什么此时逐条处理、如何从错误日志定位失败，以及 S2 为什么再引入多路复用。
 
-## 7. 来源记录与本轮核对
+## 7. 来源记录与启动设计时的核对
 
 - KamaClaude：固定提交 [70decaf06b284b8e72b90f8369ec75bbfcf4dc81](https://github.com/youngyangyang04/KamaClaude/tree/70decaf06b284b8e72b90f8369ec75bbfcf4dc81)。本轮查阅该版本 [README](https://github.com/youngyangyang04/KamaClaude/blob/70decaf06b284b8e72b90f8369ec75bbfcf4dc81/README.md) 和 [socket_server.py 的启动、关闭及读取部分](https://github.com/youngyangyang04/KamaClaude/blob/70decaf06b284b8e72b90f8369ec75bbfcf4dc81/src/kama_claude/core/transport/socket_server.py)。参考常驻 Core、loopback TCP 和分帧设计；不直接沿用包含后续阶段职责的完整服务端。
 - AemeathCode：固定提交 [cd98b83e46dba24abfd103473d4c711396c181f3](https://github.com/Nijikasuki/AemeathCode/tree/cd98b83e46dba24abfd103473d4c711396c181f3)。本轮查阅该版本 [README 的阶段表、双进程结构和 Windows 限制](https://github.com/Nijikasuki/AemeathCode/blob/cd98b83e46dba24abfd103473d4c711396c181f3/README.md)。借鉴逐阶段解决具体工程问题的方法；本项目按自己的 ROADMAP 推进，并将 Windows 原生支持列为要求。
 - 旧 CodePilot：只读核对 README、WIRE_PROTOCOL 和文件结构；实际本地 HEAD 为 `75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35`。本轮未运行旧测试、未复制源码/环境/密钥/记录。旧仓库成绩不进入新仓库验证记录。
 
-本轮没有直接复用代码。上面的默认值与协议裁剪是新项目的 S0 设计选择，不宣称来自参考项目或已通过实测。
+没有直接复用参考代码。默认值与协议裁剪是新项目的 S0 设计选择；其实际验证范围见 S0_VALIDATION，不扩展为后续能力已实现的声明。

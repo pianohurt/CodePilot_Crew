@@ -28,6 +28,14 @@ async def receive(reader: asyncio.StreamReader) -> dict[str, Any]:
     return decode_frame(frame)
 
 
+async def assert_disconnected(reader: asyncio.StreamReader) -> None:
+    try:
+        assert await asyncio.wait_for(reader.read(), 1) == b""
+    except ConnectionResetError:
+        # Windows 关闭仍有未读残片的 TCP 连接时，可能以重置而非 EOF 通知对端。
+        pass
+
+
 def ping_frame(request_id: str = "req-1") -> bytes:
     return encode_frame({"jsonrpc": "2.0", "id": request_id, "method": "core.ping", "params": {}})
 
@@ -83,20 +91,22 @@ async def test_crlf_request_is_accepted(core_server: SocketServer) -> None:
 
 
 async def test_partial_disconnect_does_not_dispatch() -> None:
-    called = asyncio.Event()
+    calls: list[str] = []
 
     async def handler(message: Request) -> dict[str, Any]:
-        called.set()
+        calls.append(message.id)
         return await dispatch(message)
 
     server = SocketServer(handler, port=0)
     await server.start()
     try:
         async with peer(server) as (_, writer):
-            writer.write(ping_frame()[:-1])
+            writer.write(ping_frame("partial")[:-1])
             await writer.drain()
-        assert not called.is_set()
-        assert (await request(server.host, server.port, "core.ping", {}))["message"] == "pong"
+        async with peer(server) as (reader, writer):
+            writer.write(ping_frame("complete"))
+            assert (await receive(reader))["result"]["message"] == "pong"
+        assert calls == ["complete"]
     finally:
         await server.close()
 
@@ -106,12 +116,12 @@ async def test_slow_and_oversized_clients_are_isolated(core_server: SocketServer
         writer.write(b"{")
         await writer.drain()
         assert (await request(core_server.host, core_server.port, "core.ping", {}))["message"] == "pong"
-        assert await asyncio.wait_for(reader.read(), 1) == b""
+        await assert_disconnected(reader)
     async with peer(core_server) as (reader, writer):
         writer.write(b"x" * (MAX_FRAME_BYTES + 1))
         await writer.drain()
         assert (await receive(reader))["error"]["code"] == -32001
-        assert await asyncio.wait_for(reader.read(), 1) == b""
+        await assert_disconnected(reader)
     assert (await request(core_server.host, core_server.port, "core.ping", {}))["message"] == "pong"
 
 
@@ -136,7 +146,7 @@ async def test_shutdown_closes_clients_and_allows_same_port_restart(core_server:
         await writer.drain()
         port = core_server.port
         await core_server.close()
-        assert await asyncio.wait_for(reader.read(), 1) == b""
+        await assert_disconnected(reader)
     replacement = SocketServer(dispatch, port=port)
     await replacement.start()
     try:
