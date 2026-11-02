@@ -95,7 +95,13 @@ class SocketServer:
                 if frame is None:
                     break
                 response = await self._process(frame)
-                await write_frame(writer, response.model_dump(), self._io_timeout)
+                try:
+                    await write_frame(writer, response.model_dump(), self._io_timeout)
+                except FrameTooLarge:
+                    await write_frame(
+                        writer, failure(response.id, -32002, "Response exceeds frame limit").model_dump(),
+                        self._io_timeout,
+                    )
         except (OSError, TimeoutError) as exc:
             logger.info("Connection ended peer=%s reason=%s", peer, type(exc).__name__)
         except Exception:

@@ -47,6 +47,11 @@ class PingResult(StrictMessage):
     server_version: Annotated[str, Field(min_length=1)]
 
 
+class AgentRunParams(StrictMessage):
+    goal: Annotated[str, Field(min_length=1, max_length=8000)]
+    max_steps: Annotated[int, Field(ge=1, le=32)] = 8
+
+
 RESPONSE = TypeAdapter(Success | Failure)
 
 

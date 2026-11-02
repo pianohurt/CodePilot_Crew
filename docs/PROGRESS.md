@@ -7,9 +7,9 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0：实现、验证与讲解已完成，本机 Windows 验收通过；Linux 与远端 CI 未运行，人工键盘演示未执行；S1—S9：未开始。
-- 已有最小包、独立环境、依赖锁、core/ping/version、配置模型、分帧和资源清理；尚未提供 Agent 能力。
-- 本地 main 分支使用独立 Git 历史；C0=1198160、C1=aab1775、C2=028c640；stage-0 定位 S0 验收/交接提交。本文件随该提交保存；无远端或上传。
+- S0 本机验收完成；S1 实现、离线行为和真实模型读取已验证，独立安装与最终交接整理中；S2—S9 未开始。
+- 当前版本 0.2.0，已有 core/ping/version/run、Provider、独立 ExecutionContext、Runner/AgentLoop、ToolRegistry 与受范围约束的 read_file/list_dir。
+- 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
 ## 用户已确认的方向
@@ -47,10 +47,10 @@
 
 - 项目使用独立 CPython 3.12.14；系统默认 Python 3.9.12 未更改。环境和运行产物已忽略。
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
-- CI 文件已配置 Windows/Linux + Python 3.12，但无远端，尚无 GitHub CI 或 Linux 实测结果。
+- CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
-- 没有 Provider、真实模型调用或 Agent Loop；S0 不需要模型密钥，不扩展为 Agent 能力已完成的声明。
-- 下一项由用户指定；若进入 S1，先设计最小 Agent Loop 与只读工具。不自动开始，也不自行创建远端或公开发布。
+- S1 只实现只读 Agent，没有写入/命令、事件流、TUI、持久化、压缩、多 Agent、MCP 或 Skills。客户端超时不等于 Core 已取消；Core 另有 90 秒运行预算。
+- 已授权 S1。完成交接后等待用户指定 S2，不自动开始后续阶段或 push。
 
 ## 启动设计时的文档检查
 
@@ -87,3 +87,16 @@
 - 新增最小 CI 工作流、README 安装/演示、S0_VALIDATION 和 S0_WALKTHROUGH，更新当前阶段状态。已围绕 ping 讲解输入、数据流、编号、错误与资源归属。
 - 收尾检查：`uv sync --locked --offline` 成功检查 13 个包；8 份 Markdown 的 25 个本地链接、围栏和 JSON 示例有效；已验证 wheel 中全部 Python 模块与当前源码一致；`git diff --check` 无输出。
 - 文档与代码随验收提交保存，stage-0 用于定位；无 push、无远端。旧 CodePilot 工作树仍干净，HEAD 仍为 75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35。
+
+## S1 实施记录：实现与行为验证
+
+- 保留用户新增的 docs/ 忽略规则，新增 S1_DESIGN/S1_VALIDATION/S1_WALKTHROUGH 分析文件留本地；已有跟踪文档继续更新。
+- 按 S1_DESIGN 实现完整响应模式的 Provider → AgentLoop → 工具 → 观察循环，RPC agent.run 与 CLI run 只传目标和步数，不把密钥或工作根目录交给客户端。
+- 配置显式读取 .env，进程环境优先；密钥使用 SecretStr，远端错误正文不回显；.env 已被忽略。
+- 验证请求/结果 id 配对、错误回填、完整批次校验、重复 id、max_tokens/未知停止原因、步数/调用数预算、超时与并发上下文隔离。
+- `uv run --locked --offline pytest -q`：105 passed in 13.46s（包含 S0 的 51 项）；无跳过。Windows 符号链接权限不可用时，测试实际创建目录 junction 验证越界拦截。
+- 固定响应 + 真文件 + RPC/CLI：2 步通过；只证明程序链路，最终文本由脚本预先给定。
+- 真实 deepseek-flash：先在 Runner 层 2 步读取随机标记并回答，再经 CLI/TCP/Core 完整链路 2 步验证。文件内容实际进入下一模型请求，最终回答含随机标记。
+- 首次真实调用因未支持 thinking/signature 返回 invalid_response，且未执行工具。检查结构后补充 opaque 原样回传与回归测试；证据轨迹省略 thinking 正文/签名，未把失败尝试算通过。
+- Windows 0.2.0 真实控制台事件回归：端口 52109 两次退出码均 0，耗时均 0.406 秒，活动连接结束且同端口重启成功。
+- 调用链和本轮取舍已讲解；独立安装与最终文档收尾在验收节点记录。没有自动 push 或进入 S2。
