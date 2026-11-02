@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-状态：S0 已实现并完成本机 Windows 验收，后续阶段未开始；具体证据与限制见 PROGRESS 和 S0_VALIDATION。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均保留 codepilot（用户于 2026-11-02 确认）。展示名使用 CodePilot Crew。
+状态：S0、S1 已实现并完成本机 Windows 验收，当前版本 0.2.0；S1 包括固定响应链路与真实 deepseek-flash 文件读取验证，S2—S9 未开始。具体证据与限制见 PROGRESS；新增 S1 分析文档遵循用户 docs/ 忽略规则留本地。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均保留 codepilot（用户于 2026-11-02 确认）。展示名使用 CodePilot Crew。
 
 ## 用户与目的
 
@@ -46,7 +46,7 @@ CodePilot_Crew/
     S0_DESIGN.md
 ```
 
-后续按阶段新增 agent、tools、tui、session、compact、subagents、mcp、skills 等职责模块。需要调整边界时，先说明现有问题、替代方案与验证影响，再记录决定。
+S1 已新增 agent、tools、core/context.py 和 core/runner.py。后续按阶段新增 tui、session、compact、subagents、mcp、skills 等职责模块。需要调整边界时，先说明现有问题、替代方案与验证影响，再记录决定。
 
 基本依赖方向：界面和客户端通过协议调用 Core；Runner 装配执行上下文与服务；Agent Loop 通过 Provider 和工具接口执行；具体工具不反向依赖 TUI。
 

@@ -14,6 +14,7 @@ from uuid import uuid4
 import httpx
 from pydantic import ValidationError
 
+from codepilot import get_version
 from codepilot.agent.provider import AnthropicProvider, FixedResponseProvider, Provider
 from codepilot.agent.types import Message, ModelResponse, RunResult, TextBlock, ToolDefinition, ToolUse
 from codepilot.core.app import CoreService
@@ -80,7 +81,7 @@ async def run_via_cli(runner: Runner, goal: str) -> RunResult:
 async def verify(provider_name: str, env_file: Path, output: Path, via_rpc: bool) -> bool:
     output.parent.mkdir(parents=True, exist_ok=True)
     secret = ""
-    metadata: dict[str, object] = {"provider": provider_name, "via_rpc_and_cli": via_rpc}
+    metadata: dict[str, object] = {"provider": provider_name, "via_rpc_and_cli": via_rpc, "codepilot_version": get_version()}
     marker = uuid4().hex
     with TemporaryDirectory(prefix="codepilot-s1-") as directory:
         workspace = Path(directory)

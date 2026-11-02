@@ -7,7 +7,7 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0 本机验收完成；S1 实现、离线行为和真实模型读取已验证，独立安装与最终交接整理中；S2—S9 未开始。
+- S0、S1 实现、验证与讲解完成，本机 Windows 验收通过；S2—S9 未开始，Linux 和远端 CI 本轮未验证。
 - 当前版本 0.2.0，已有 core/ping/version/run、Provider、独立 ExecutionContext、Runner/AgentLoop、ToolRegistry 与受范围约束的 read_file/list_dir。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
@@ -100,3 +100,14 @@
 - 首次真实调用因未支持 thinking/signature 返回 invalid_response，且未执行工具。检查结构后补充 opaque 原样回传与回归测试；证据轨迹省略 thinking 正文/签名，未把失败尝试算通过。
 - Windows 0.2.0 真实控制台事件回归：端口 52109 两次退出码均 0，耗时均 0.406 秒，活动连接结束且同端口重启成功。
 - 调用链和本轮取舍已讲解；独立安装与最终文档收尾在验收节点记录。没有自动 push 或进入 S2。
+
+## S1 验收与交接
+
+- 实现节点为 5054632；stage-1 用于定位本次验收/交接提交，stage-0 保留。当前 main 相对本轮起点 b7386f0 增加两个本地提交，未 push。
+- 独立构建 codepilot-0.2.0-py3-none-any.whl，安装到新环境 .cache/s1-install-check（13 个包），从该目录确认导入来自其 site-packages，version=0.2.0。
+- 安装后的固定响应 RPC/CLI 2 步通过；安装后的真实 deepseek-flash RPC/CLI 2 步通过。均验证实际读取、下一请求观察及最终随机标记，证据为 artifacts/s1-fixed-installed.json 与 artifacts/s1-real-installed.json。
+- 新增本地 S1_DESIGN、S1_VALIDATION、S1_WALKTHROUGH；README 公布安装、配置、只读运行、验证命令和限制，源码/测试/脚本均可审查；.env 和证据文件没有进入提交。
+- Thinking 正文与签名只在内存中原样透传给模型，不解释或展示；演示轨迹省略它们，不能说成完整原始 API 记录。
+- status=success 只表示循环正常给出最终文本，不自动判断任意任务达成。本案例通过额外文件标记核对证明读取任务完成。
+- 阶段到此为止，等待用户指定 S2；无自动 push、无后续阶段实现。
+- 收尾检查：11 份 Markdown、29 个本地链接、代码围栏与 JSON 示例有效；0.2.0 wheel 的全部 Python 模块与当前源码一致，归档不含缓存/配置/字节码；已跟踪内容未检出本机配置密钥。确认 .env、运行证据与新增 S1 分析文档被忽略，`git diff --check` 通过。旧 CodePilot 工作树仍干净，HEAD 不变。
