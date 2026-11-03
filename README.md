@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前安装包版本为 1.0.0。S9 已完成实现及 Windows 和本机 Ubuntu 离线验收，真实模型重复评测等待配置更新。功能、设计取舍和可复验证据见下文及 [整体评测](EVALUATION.md)。
+当前安装包版本为 1.0.0。S9 已完成 Windows 和本机 Ubuntu 离线验收，真实模型读取任务复跑通过 3/3。功能、设计取舍和可复验证据见下文及 [整体评测](EVALUATION.md)。
 
 本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩、流式重试、多 Agent 委派、MCP stdio 和 Markdown Skills。
 
@@ -327,4 +327,4 @@ uv run --locked python scripts/evaluate_s9.py --env-file .env --output artifacts
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。现有阶段标签为 stage-0 至 stage-8。贡献变更请同时给出行为证据，固定响应、真实工具结果与真实模型结果分别记录。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。现有阶段标签为 stage-0 至 stage-9。贡献变更请同时给出行为证据，固定响应、真实工具结果与真实模型结果分别记录。

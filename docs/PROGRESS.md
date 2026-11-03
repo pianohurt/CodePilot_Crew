@@ -7,7 +7,7 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S8 本机 Windows 验收完成。S9 已实现，Windows 和本机 Ubuntu 各通过 244 项回归与 9 项固定任务。真实模型重复验收等待本机配置更新。
+- S0—S9 本机验收完成。S9 的 Windows 和本机 Ubuntu 各通过 244 项回归与 9 项固定任务，真实模型读取复跑 3/3。
 - 当前安装包版本 1.0.0。已有受控工具、会话恢复、上下文压缩、流式重试、委派、MCP stdio、Skills 与自动启动。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
@@ -47,10 +47,10 @@
 
 - 项目使用独立 CPython 3.12.14；系统默认 Python 3.9.12 未更改。环境和运行产物已忽略。
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
-- CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
+- CI 文件已配置 Windows/Linux + Python 3.12。S9 已完成 Ubuntu WSL 本机验证，远端 CI 待运行。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
 - S5 在模型输入层压缩历史，存储上限继续适用于完整历史。会话恢复读取上下文并重算摘要。流式重试受单步三次尝试和 run 总时限约束。
-- 命令和配置启动的 MCP 服务以当前用户权限运行。子任务共享工作区，生命周期限于当前根 run。MCP 当前使用 stdio 和启动时发现。Skill 白名单按运行生效。下一计划阶段为 S9 展示、安装与整体评测。
+- 命令和配置启动的 MCP 服务以当前用户权限运行。子任务共享工作区，生命周期限于当前根 run。MCP 当前使用 stdio 和启动时发现。Skill 白名单按运行生效。
 
 ## 启动设计时的文档检查
 
@@ -259,5 +259,6 @@
 - Windows 244 passed in 44.53s，见 artifacts/s9-pytest.txt。固定任务集 9/9，包含真实 TCP、模拟审批、断流后的真实单次写入、MCP 写后报错，以及跨 Core 进程恢复。指标见 artifacts/s9-offline.json。固定响应的模拟用量与真实 API 用量分开。
 - 1.0.0 wheel 在独立环境安装 26 个运行时包，52 个 Python 与 Skill 文件逐字节核对。安装版固定 TUI 案例通过，见 artifacts/s9-tui.json 和 s9-tui.svg。原生 Windows Ctrl+C 同端口启动两次均退出 0，耗时 0.359 与 0.360 秒，见 artifacts/windows-s9-ctrl-c.json。
 - Ubuntu WSL（Python 3.12.3）在独立目录执行 uv sync --locked、pytest 与 evaluate_s9.py，244 passed in 26.08s，固定任务 9/9。构建并安装 1.0.0 wheel 后核对 version 与 start --help，命令均成功。见 artifacts/s9-linux.txt。
-- 独立安装版执行固定真实任务三次，均在第一个模型请求返回 provider_error，未派发工具。初始报告保存在 artifacts/s9-real-initial.json。单独诊断收到 HTTP 503。用户选择更新本机配置后复验，stage-9 待真实验收收尾。
+- 独立安装版执行同一真实任务三次，首轮均在第一个模型请求返回 provider_error，工具派发为 0。初始报告保存在 artifacts/s9-real-initial.json。单独诊断收到 HTTP 503。
+- 用户告知服务应已恢复后，使用现有配置和独立安装的 1.0.0 执行 scripts/evaluate_s9.py --env-file .env --trials 3 --output artifacts/s9-real.json，deepseek-flash 复跑 3/3。每轮两次模型请求、一次真实文件读取、零重复派发和零人工介入。均返回正确文件名和标识，文件内容核对一致。耗时与 token 见 EVALUATION.md。stage-9 标记本地验收提交。
 - CI 增加固定任务集和干净 wheel 安装检查，矩阵为 Windows 与 Ubuntu。远端 CI 等待远端运行。

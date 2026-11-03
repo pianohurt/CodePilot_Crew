@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-S0—S8 已完成本机验收。S9 实现版本 1.0.0，Windows 与本机 Ubuntu 各通过 244 项离线检查与 9 项固定任务。真实模型重复验收等待配置更新。具体结果见 PROGRESS。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew。Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
+S0—S9 已完成本机验收。S9 实现版本 1.0.0，Windows 与本机 Ubuntu 各通过 244 项离线检查与 9 项固定任务，真实模型读取复跑 3/3。具体结果见 PROGRESS。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew。Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
 
 ## 用户与目的
 

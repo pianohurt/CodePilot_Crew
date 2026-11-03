@@ -45,4 +45,12 @@ uv run --locked --offline python scripts/evaluate_s9.py --output artifacts/s9-of
 uv run --locked python scripts/evaluate_s9.py --env-file .env --trials 3 --output artifacts/s9-real.json
 ```
 
-首轮模型为 deepseek-flash。三次试验均在首次请求返回 provider_error，工具派发均为 0。另一次诊断复跑收到 HTTP 503。首轮报告保存在 `artifacts/s9-real-initial.json`，真实模型验收等待本机配置更新后复验。S6 至 S8 已有独立的真实模型通过记录。
+首轮使用 deepseek-flash，三次试验均在首次请求返回 provider_error，工具派发均为 0。另一次诊断收到 HTTP 503。首轮报告保存在 `artifacts/s9-real-initial.json`。
+
+用户告知服务应已恢复后，使用现有配置和独立安装的 1.0.0 复跑，结果为 3/3。每轮调用模型两次，实际执行一次 read_file，回答包含文件名与精确标识，文件内容核对一致。三轮均无重复工具派发与人工介入。完整结果见 `artifacts/s9-real.json`。
+
+| 轮次 | 耗时（秒） | 输入 token | 缓存读取 token | 输出 token |
+|---|---:|---:|---:|---:|
+| 1 | 4.963 | 445 | 2688 | 113 |
+| 2 | 5.145 | 444 | 2688 | 123 |
+| 3 | 4.076 | 445 | 2688 | 111 |
