@@ -7,8 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S6 本机 Windows 验收完成，219 项离线检查通过。S6 另有真实模型前台交接复验。Linux 与远端 CI 尚未验证。
-- 当前版本 0.7.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试和多 Agent 委派。F10 和“退出”按钮由 c3a9318 引入。
+- S0—S7 本机 Windows 验收完成，228 项离线检查通过。S7 另有官方 filesystem 服务与真实模型调用复验。Linux 与远端 CI 尚未验证。
+- 当前版本 0.8.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试、多 Agent 委派和 MCP stdio。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,7 +50,7 @@
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
 - S5 在模型输入层压缩历史，存储上限继续适用于完整历史。会话恢复读取上下文并重算摘要。流式重试受单步三次尝试和 run 总时限约束。
-- 命令以当前用户权限运行。取消和断连会清理连接拥有的等待及普通命令进程树。子任务共享工作区，生命周期限于当前根 run。下一计划阶段为 S7 MCP。
+- 命令和配置启动的 MCP 服务以当前用户权限运行。子任务共享工作区，生命周期限于当前根 run。MCP 当前使用 stdio 和启动时发现。下一计划阶段为 S8 Skills。
 
 ## 启动设计时的文档检查
 
@@ -229,3 +229,14 @@
 - 真实 deepseek-flash 首次执行两个子任务均成功读取且最终标识正确，但违反脚本要求的根任务只调用委派工具。保留 artifacts/s6-real.json 的失败结果。复验改为直接核对 reviewer 收到 planner 的精确标识以及两个子任务的实际读取。复验通过，根任务 4 步，工具为 list_dir、spawn_agent、spawn_agent、read_file。用量为 input_tokens=2665、cache_creation_input_tokens=0、cache_read_input_tokens=10240、output_tokens=2245。见 artifacts/s6-real-handoff.json。
 - 从锁文件离线构建 0.7.0，在独立环境安装 21 个运行时包。44 个 Python 模块在源码、wheel 和安装目录逐字节一致。使用安装包复跑 S6 的 13 项专项通过，固定响应的挂载 TUI 读文件回归通过。报告 artifacts/s6-fixed-installed.json。
 - stage-6 标记本地验收提交。后台结果随根 run 回收，早期阶段的会话恢复继续处理根会话历史。Linux 和远端 CI 尚未验证。
+
+## S7 MCP stdio 外部工具
+
+- 起点 stage-6 的 d3bb7c4。核对旧仓库 cf6fc3a 的 MCP 模块路径，按官方规范独立实现 stdio。客户端发起 initialize，检查协商版本与工具能力，发送 initialized，再分页 tools/list。请求版本为 2025-06-18，接受 2025-03-26 与 2024-11-05 的协商回退。使用有界 UTF-8 换行帧，每个服务串行关联 JSON-RPC 请求和响应。[MCP 传输](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) · [生命周期](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle) · [工具](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+- Core 通过 --mcp-config 显式启动进程。注册时保留输入 Schema，以 mcp__服务名__工具名 对模型公开，调用发送远端原名。名字冲突使启动失败并回收已启动服务。jsonschema 校验参数，referencing 的空注册表限制外部引用。工具注册复用审批、tool.started、tool.completed 和结果配对。默认 ask，策略文件可按完整工具名授权或拒绝。
+- isError 和 JSON-RPC 错误按失败回执返回，保留远端错误文本。支持文本与 JSON 对象结果，其他内容返回明确错误。超时、取消、协议中断关闭连接，远端可能已执行的动作保持未知状态，客户端没有自动重连或重放。服务复用 S3 的进程 supervisor，Core 先结束运行再关闭服务。
+- 本地 scripts/mcp_demo_server.py 支持 echo，显式故障模式提供分页、重复名称、写后报错、断连和阻塞。9 项专项覆盖服务命名、Schema、本地引用与审批、错误和进程关闭。每个模拟写入失败案例只写入一次。用真实 TCP 启动任务后取消 Core，确认仍在处理调用的服务 PID 已结束。
+- Windows 全量 228 passed in 41.11s。使用 .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider --basetemp .cache/s7-full，输出 artifacts/s7-pytest.txt。
+- 官方 @modelcontextprotocol/server-filesystem 2.1.0 通过 Node v24.19.0 启动，只公开临时目录的 read_text_file。固定响应和真实 deepseek-flash 均在两步内执行实际读取，最终答案包含临时文件随机标识。证据为 artifacts/s7-external-fixed.json 和 artifacts/s7-external-real.json。[官方 filesystem 服务](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+- 构建 0.8.0 wheel。独立环境首次离线安装缺少 rpds-py 缓存，按锁定版本补齐后安装 26 个运行时包。48 个 Python 模块在源码、wheel 和安装目录逐字节一致。安装后运行官方服务的固定模型复验，并复跑 S7 与 S3 进程控制共 21 项，全部通过。见 artifacts/s7-installed-fixed.json。
+- stage-7 标记本地验收提交。MCP 工具按启动时发现公开，连接中断需重启 Core。Linux 和远端 CI 尚未验证。

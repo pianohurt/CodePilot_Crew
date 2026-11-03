@@ -36,16 +36,15 @@ class PreparedAction:
 
 
 @dataclass
-class RegisteredTool[T: BaseModel]:
+class RegisteredTool:
     definition: ToolDefinition
-    parameters: type[T]
-    handler: Callable[[T, ExecutionContext], Awaitable[str]] | None
-    prepare: Callable[[T, ExecutionContext], PreparedAction] | None = None
+    validate: Callable[[dict[str, Any]], tuple[Any, dict[str, Any]]]
+    prepare: Callable[[Any, ExecutionContext], PreparedAction]
 
 
 class ToolRegistry:
     def __init__(self, *, timeout: float = 2.0) -> None:
-        self._tools: dict[str, RegisteredTool[Any]] = {}
+        self._tools: dict[str, RegisteredTool] = {}
         self._timeout = timeout
 
     def register[T: BaseModel](
@@ -53,12 +52,41 @@ class ToolRegistry:
         handler: Callable[[T, ExecutionContext], Awaitable[str]] | None = None,
         *, prepare: Callable[[T, ExecutionContext], PreparedAction] | None = None,
     ) -> None:
-        if name in self._tools:
-            raise ValueError(f"Duplicate tool: {name}")
         if handler is None and prepare is None:
             raise ValueError("Tool requires a handler or preparer")
         definition = ToolDefinition(name=name, description=description, input_schema=parameters.model_json_schema())
-        self._tools[name] = RegisteredTool(definition, parameters, handler, prepare)
+
+        def validate(raw: dict[str, Any]) -> tuple[T, dict[str, Any]]:
+            parsed = parameters.model_validate(raw)
+            return parsed, parsed.model_dump()
+
+        def action(parsed: T, context: ExecutionContext) -> PreparedAction:
+            if prepare is not None:
+                return prepare(parsed, context)
+            assert handler is not None
+
+            async def invoke() -> str:
+                return await handler(parsed, context)
+
+            return PreparedAction({"input": parsed.model_dump()}, invoke, self._timeout)
+
+        self._register(RegisteredTool(definition, validate, action))
+
+    def register_external(
+        self, definition: ToolDefinition, check: Callable[[dict[str, Any]], None],
+        prepare: Callable[[dict[str, Any], ExecutionContext], PreparedAction],
+    ) -> None:
+        def validate(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+            check(raw)
+            return raw, raw
+
+        self._register(RegisteredTool(definition, validate, prepare))
+
+    def _register(self, tool: RegisteredTool) -> None:
+        name = tool.definition.name
+        if name in self._tools:
+            raise ValueError(f"Duplicate tool: {name}")
+        self._tools[name] = tool
 
     @property
     def names(self) -> frozenset[str]:
@@ -78,23 +106,18 @@ class ToolRegistry:
             error = "permission_denied"
         else:
             try:
-                parameters = tool.parameters.model_validate(call.input)
+                parameters, inputs = tool.validate(call.input)
                 decision = context.policy.decision(call.name)
                 if decision == "deny":
                     raise ApprovalError("permission_denied")
-                if tool.prepare:
-                    action = tool.prepare(parameters, context)
-                else:
-                    async def invoke() -> str:
-                        return await tool.handler(parameters, context)
-                    action = PreparedAction({"input": parameters.model_dump()}, invoke, self._timeout)
+                action = tool.prepare(parameters, context)
                 if decision == "ask":
                     if context.approver is None:
                         raise ApprovalError("approval_unavailable: use the TUI or an explicit server policy")
                     if not await context.approver(call, action.preview, context):
                         raise ApprovalError("approval_denied")
                 if context.events:
-                    context.events.emit("tool.started", step=context.step, tool_use_id=call.id, name=call.name, input=parameters.model_dump())
+                    context.events.emit("tool.started", step=context.step, tool_use_id=call.id, name=call.name, input=inputs)
                 async with asyncio.timeout(action.timeout):
                     content = await action.invoke()
             except ValidationError as exc:

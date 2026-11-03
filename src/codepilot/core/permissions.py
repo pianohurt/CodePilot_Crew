@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from codepilot.agent.types import ToolUse
 
@@ -24,8 +24,13 @@ class PermissionPolicy(BaseModel):
     note_save: Decision = "ask"
     spawn_agent: Decision = "allow"
     agent_result: Decision = "allow"
+    mcp_tools: dict[str, Decision] = Field(default_factory=dict)
 
     def decision(self, name: str) -> Decision:
+        if name.startswith("mcp__"):
+            return self.mcp_tools.get(name, "ask")
+        if name == "mcp_tools":
+            return "deny"
         return getattr(self, name, "deny")
 
 

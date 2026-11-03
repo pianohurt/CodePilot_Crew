@@ -57,7 +57,11 @@ def main() -> int:
             return 125
         payload = json.loads(line)
         # 父进程确认握手并发出已批准参数后，才创建任何命令进程。
-        process = subprocess.Popen(payload["argv"], cwd=payload["cwd"], stdin=subprocess.DEVNULL)
+        use_stdio = payload.get("stdio") is True
+        if use_stdio:
+            # 客户端等到此确认才发首条协议消息，避免握手读取预取工具输入。
+            print('{"supervisor":"starting"}', flush=True)
+        process = subprocess.Popen(payload["argv"], cwd=payload["cwd"], stdin=None if use_stdio else subprocess.DEVNULL)
         return process.wait()
     except (OSError, ValueError, KeyError):
         if job is None:

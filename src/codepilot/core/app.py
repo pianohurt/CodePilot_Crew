@@ -28,6 +28,7 @@ from codepilot.transport.server import SocketServer
 from codepilot.transport.peer import PeerConnection, current_peer
 from codepilot.session.manager import SessionManager, SessionTurn
 from codepilot.session.store import SessionError, SessionStore
+from codepilot.mcp.config import McpConfig
 from codepilot.protocol.messages import SessionCreateParams, SessionListParams, SessionParams
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ async def run_core(
     record_dir: Path | None = None,
     policy: PermissionPolicy | None = None,
     session_dir: Path | None = None,
+    mcp_config: McpConfig | None = None,
 ) -> None:
     async with AsyncExitStack() as resources:
         workspace = (workspace or Path.cwd()).resolve(strict=True)
@@ -161,6 +163,11 @@ async def run_core(
         store = SessionStore(session_dir, workspace, secrets)
         resources.callback(store.close)
         sessions = SessionManager(store)
+        registry = builtin_registry()
+        if mcp_config is not None and mcp_config.servers:
+            from codepilot.mcp.tools import connect_tools
+
+            await connect_tools(mcp_config, workspace, registry, resources)
         runner = None
         if model is not None:
             client = await resources.enter_async_context(httpx.AsyncClient(timeout=model.model_timeout))
@@ -169,7 +176,7 @@ async def run_core(
                 model=model.model, max_tokens=model.max_tokens, context_budget=model.context_budget,
             )
             runner = Runner(
-                provider, builtin_registry(), workspace or Path.cwd(), policy=policy,
+                provider, registry, workspace, policy=policy,
                 record_dir=record_dir or (workspace or Path.cwd()) / "artifacts" / "runs",
                 secrets=secrets, sessions=sessions,
             )

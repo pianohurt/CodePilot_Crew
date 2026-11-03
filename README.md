@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-当前版本为 0.7.0，S0—S6 已完成本机 Windows 验收，219 项离线检查通过。S6 增加前台委派、后台调查、结果查询和父子用量汇总。真实模型与离线验证结果见项目进度。
+当前版本为 0.8.0，S0—S7 已完成本机 Windows 验收，228 项离线检查通过。S7 接入 MCP stdio 工具发现、Schema 校验和受控调用，并使用官方 filesystem 服务验证。
 
-本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩、流式重试与多 Agent 委派。
+本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩、流式重试、多 Agent 委派与 MCP stdio。
 
 ## 本机安装与演示（Windows PowerShell）
 
@@ -22,7 +22,7 @@ uv --cache-dir .cache/uv sync --locked
 uv --cache-dir .cache/uv run --locked codepilot version
 ```
 
-预期输出 `codepilot 0.7.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
+预期输出 `codepilot 0.8.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
 
 第一个终端启动 Core：
 
@@ -158,6 +158,33 @@ planner 与 reviewer 可以读取文件和列目录，前台 executor 还可在�
 
 每个根任务允许一层委派，最多创建 6 个子任务，其中最多 2 个同时执行。默认共享 90 秒截止时间、64 次模型请求和 48 次工具调用的预算。摘要请求和流式重试计入模型次数。根任务正常结束、取消、超时或连接关闭时，会取消并等待未完成子任务。终端工具区显示子任务状态，根结果及会话用量汇总父子已收到的完整模型响应。
 
+## 接入 MCP stdio 工具
+
+从项目根目录启动 Core，把以下内容保存到 `.cache/mcp-demo.json`。配置由 Core 显式加载，服务命令在指定工作区启动。Windows 上使用可直接启动的可执行文件，例如 `node.exe` 或虚拟环境的 `python.exe`。
+
+```json
+{
+  "servers": {
+    "demo": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["scripts/mcp_demo_server.py"],
+      "tools": ["echo"],
+      "timeout_seconds": 10
+    }
+  }
+}
+```
+
+```powershell
+uv --cache-dir .cache/uv run --locked codepilot core --workspace . --env-file .env --mcp-config .cache/mcp-demo.json
+```
+
+另一个终端连接 TUI，输入“用 mcp__demo__echo 回显 Hello MCP”，核对参数后批准。Core 先完成 `initialize` 和 `notifications/initialized`，通过 `tools/list` 获取工具及 Schema。模型看到的工具名是 `mcp__<服务名>__<工具名>`，执行时客户端向指定服务发送原名。工具名中的非字母、数字、下划线和连字符会映射为下划线，发现重名会中止启动。省略 `tools` 会公开发现的全部工具，空数组表示公开零个工具。
+
+模型提出参数后，ToolRegistry 先按 Schema 校验，再根据策略审批。外部工具默认 `ask`，可在 `--policy-file` 的 `mcp_tools` 中按完整工具名设为 `allow`、`ask` 或 `deny`。例如，`{"mcp_tools":{"mcp__demo__echo":"allow"}}` 允许该工具直接执行。服务启动本身会运行本地配置指定的程序，进程拥有当前用户权限。S6 子任务仍使用其角色工具集合。
+
+S7 处理 stdio 的文本与 JSON 对象结果。远端 `isError` 或 JSON-RPC 错误会产生带错误标志的工具回执，内容包含远端错误文本。每个服务串行处理调用。调用超时、取消或断连后关闭该通道，后续请求报告不可用，需要重启 Core 恢复服务。服务关闭会回收其进程树。工具列表在启动时发现，Schema 引用限于本地定义。 [MCP 生命周期规范](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle) · [MCP 工具规范](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+
 ## 验证与学习
 
 ```powershell
@@ -218,6 +245,16 @@ uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test
 uv --cache-dir .cache/uv run --locked python scripts/verify_s6.py --env-file .env
 ```
 
+S7 可运行本地故障测试，再用固定版本的官方 filesystem 服务复验。加上 `--env-file .env` 会使用配置的真实模型，省略时使用固定响应。两种模式都读取实际临时文件。 [官方 filesystem 服务](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+
+```powershell
+uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test_s7_mcp.py
+npm.cmd install --prefix .cache/s7-fs --ignore-scripts --no-audit --no-fund @modelcontextprotocol/server-filesystem@2.1.0
+$fsEntry = '.cache/s7-fs/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'
+uv --cache-dir .cache/uv run --locked --offline python scripts/verify_s7.py --filesystem-entry $fsEntry
+uv --cache-dir .cache/uv run --locked python scripts/verify_s7.py --filesystem-entry $fsEntry --env-file .env
+```
+
 ## 从哪里开始
 
 | 文件 | 用途 |
@@ -230,10 +267,10 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s6.py --env-file .en
 | [S0_VALIDATION.md](docs/S0_VALIDATION.md) | 实际命令、结果、故障与未验证项 |
 | [S0_WALKTHROUGH.md](docs/S0_WALKTHROUGH.md) | 以 ping 解释关键函数、状态、错误路径与取舍 |
 
-每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S6。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
+每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S7。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
 
 ## 参考与开发方式
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-6 用于定位已验收阶段。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-7 用于定位已验收阶段。
