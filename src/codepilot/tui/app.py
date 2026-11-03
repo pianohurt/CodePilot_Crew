@@ -53,7 +53,7 @@ class CodePilotApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static("连接中…", id="status")
+        yield Static("连接中…", id="status", markup=False)
         with Horizontal(id="session-controls"):
             yield Select([], prompt="选择要恢复的会话", id="sessions")
             yield Button("刷新", id="refresh-sessions")
@@ -140,7 +140,14 @@ class CodePilotApp(App[None]):
         detail = f" · {view.result.stop_reason}" if view.result else ""
         if view.result is None and attempt > 1:
             detail = f" · 第 {attempt} 次模型尝试"
-        self.query_one("#status", Static).update(f"{status} · 步骤 {view.step} · {view.run_id[:8]}{detail}")
+        header = f"{status} · 步骤 {view.step} · {view.run_id[:8]}{detail}"
+        if view.skill:
+            header += f" · Skill {view.skill}"
+        if metrics := view.context_budget:
+            header += f"\n上下文估算 {metrics['after']:,}/{metrics['budget']:,}"
+            if metrics["before"] != metrics["after"]:
+                header += f" · 原估算 {metrics['before']:,} · 摘要 {metrics['summaries']} 次"
+        self.query_one("#status", Static).update(header)
         busy = view.result is None
         self.query_one("#goal", Input).disabled = busy
         self.query_one("#start", Button).disabled = busy or self._launching or not self._connected

@@ -7,8 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S8 本机 Windows 验收完成，239 项离线检查通过。S8 另有项目级 Skill 与官方 filesystem 的真实模型组合复验。Linux 与远端 CI 尚未验证。
-- 当前版本 0.9.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试、多 Agent 委派、MCP stdio 和 Markdown Skills。F10 和“退出”按钮由 c3a9318 引入。
+- S0—S8 本机 Windows 验收完成。S9 已实现，Windows 和本机 Ubuntu 各通过 244 项回归与 9 项固定任务。真实模型重复验收等待本机配置更新。
+- 当前安装包版本 1.0.0。已有受控工具、会话恢复、上下文压缩、流式重试、委派、MCP stdio、Skills 与自动启动。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -251,3 +251,13 @@
 - S7 验证脚本增加 --skill 模式。临时项目用 review 覆盖内置定义，只开放 mcp__fs__read_text_file。固定响应和真实 deepseek-flash 分别在两步内读到随机文件标识，核对请求中的实际目标与唯一工具名。证据为 artifacts/s8-mcp-fixed.json 和 artifacts/s8-mcp-real.json。
 - 从锁文件离线构建并安装 0.9.0 wheel，26 个运行时包。49 个 Python 模块及 2 个内置 Markdown 文件在源码、wheel 和安装目录逐字节一致。安装环境复跑 11 项 S8 测试及官方服务的固定响应组合通过，见 artifacts/s8-mcp-installed.json。
 - stage-8 标记本地验收提交。当前使用显式命令按运行加载 Skill。Linux 与远端 CI 尚未验证。
+
+## S9 启动、展示与整体评测
+
+- 起点 stage-8 的 3bd1af5。新增 start 和 setup。start 用 core.info 核对版本、工作区和模型配置。它在同一事件循环启动本次拥有的 Core，并在退出时回收。Windows 空端口可能在连接阶段超时，启动时仍由绑定仲裁。连接已建立但 RPC 无响应时返回错误。setup 验证输入，隐藏 API Key 并独占创建配置文件。
+- TUI 状态行显示当前 Skill、步骤、重试与上下文预算。上下文预算来自 Core 的 context.ready 事件。README 提供首次运行、四项能力代码索引与架构图，EVALUATION.md 提供演示步骤、可投递说明和任务结果。
+- Windows 244 passed in 44.53s，见 artifacts/s9-pytest.txt。固定任务集 9/9，包含真实 TCP、模拟审批、断流后的真实单次写入、MCP 写后报错，以及跨 Core 进程恢复。指标见 artifacts/s9-offline.json。固定响应的模拟用量与真实 API 用量分开。
+- 1.0.0 wheel 在独立环境安装 26 个运行时包，52 个 Python 与 Skill 文件逐字节核对。安装版固定 TUI 案例通过，见 artifacts/s9-tui.json 和 s9-tui.svg。原生 Windows Ctrl+C 同端口启动两次均退出 0，耗时 0.359 与 0.360 秒，见 artifacts/windows-s9-ctrl-c.json。
+- Ubuntu WSL（Python 3.12.3）在独立目录执行 uv sync --locked、pytest 与 evaluate_s9.py，244 passed in 26.08s，固定任务 9/9。构建并安装 1.0.0 wheel 后核对 version 与 start --help，命令均成功。见 artifacts/s9-linux.txt。
+- 独立安装版执行固定真实任务三次，均在第一个模型请求返回 provider_error，未派发工具。初始报告保存在 artifacts/s9-real-initial.json。单独诊断收到 HTTP 503。用户选择更新本机配置后复验，stage-9 待真实验收收尾。
+- CI 增加固定任务集和干净 wheel 安装检查，矩阵为 Windows 与 Ubuntu。远端 CI 等待远端运行。

@@ -86,6 +86,8 @@ async def fit_context(
 
     before = cost(working, tools)
     if before <= budget:
+        if context.events:
+            context.events.emit("context.ready", step=context.step, before=before, after=before, budget=budget, summaries=0)
         return working
     working = clip_observations(working)
     count = 0
@@ -130,6 +132,8 @@ async def fit_context(
 
     metrics = {"before": before, "after": cost(working, tools), "budget": budget, "summaries": count}
     context.record("context.compacted", **metrics)
+    if context.events:
+        context.events.emit("context.ready", step=context.step, **metrics)
     if context.recorder:
         context.recorder.trace("context.compacted", context.step, **metrics)
     return working

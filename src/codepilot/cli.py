@@ -54,6 +54,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="codepilot")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("version", help="显示本地安装版本")
+    setup = commands.add_parser("setup", help="在交互终端配置模型")
+    setup.add_argument("--env-file", type=Path, default=Path(".env"))
+    start = commands.add_parser("start", help="探活并启动工作台，或执行给定目标")
+    start.add_argument("goal", nargs="?")
+    start.add_argument("--workspace", type=Path, default=Path.cwd())
+    start.add_argument("--port", type=int)
+    start.add_argument("--timeout", type=float)
+    start.add_argument("--env-file", type=Path)
+    start.add_argument("--policy-file", type=Path)
+    start.add_argument("--mcp-config", type=Path)
+    start.add_argument("--session", dest="session_id")
+    start.add_argument("--max-steps", type=int, default=8)
+    start.add_argument("--json", action="store_true")
     core = commands.add_parser("core", help="在前台启动 Core，Ctrl+C 退出")
     core.add_argument("--port", type=int)
     core.add_argument("--log-level")
@@ -89,9 +102,18 @@ def main() -> int:
     if args.command == "version":
         print(f"codepilot {get_version()}")
         return 0
+    if args.command == "setup":
+        from codepilot.launch import setup_model
+
+        try:
+            setup_model(args.env_file)
+        except (RuntimeError, OSError, EOFError, KeyboardInterrupt) as exc:
+            print(f"配置未完成 {exc}", file=sys.stderr)
+            return 2
+        return 0
     try:
         timeout = getattr(args, "timeout", None)
-        if args.command == "run" and timeout is None:
+        if (args.command == "run" or (args.command == "start" and args.goal is not None)) and timeout is None:
             timeout = float(os.environ.get("CODEPILOT_CREW_TIMEOUT", "120"))
         settings = load_settings(
             port=args.port,
@@ -106,7 +128,9 @@ def main() -> int:
             model = load_model_settings(args.env_file)
             policy = load_policy(args.policy_file)
             mcp_config = load_mcp_config(args.mcp_config)
-        elif args.command == "run" and (not args.goal.strip() or len(args.goal) > 8000 or not 1 <= args.max_steps <= 32):
+        elif args.command in {"run", "start"} and args.goal is not None and (
+            not args.goal.strip() or len(args.goal) > 8000 or not 1 <= args.max_steps <= 32
+        ):
             raise ValueError("Goal must contain 1..8000 characters and max_steps must be in 1..32")
     except (ValidationError, ValueError, OSError) as exc:
         details = "; ".join(f"{'.'.join(map(str, item['loc'])) or 'configuration'}: {item['msg']}" for item in exc.errors()) if isinstance(exc, ValidationError) else str(exc)
@@ -114,6 +138,20 @@ def main() -> int:
         return 2
     configure_logging(settings.log_level)
     try:
+        if args.command == "start":
+            from codepilot.launch import available_core
+
+            async def start_app() -> int:
+                async with available_core(settings, args.workspace, env_file=args.env_file,
+                                          policy_file=args.policy_file, mcp_file=args.mcp_config):
+                    if args.goal is not None:
+                        return await run_agent(settings, args.goal, args.max_steps, args.json, args.session_id)
+                    from codepilot.tui.app import CodePilotApp
+
+                    await CodePilotApp(settings, session_id=args.session_id).run_async()
+                    return 0
+
+            return asyncio.run(start_app())
         if args.command == "tui":
             from codepilot.tui.app import CodePilotApp
             CodePilotApp(settings, session_id=args.session_id).run()
@@ -133,7 +171,7 @@ def main() -> int:
     except TimeoutError:
         print("Request or cleanup timed out", file=sys.stderr)
         return 1
-    except (OSError, ProtocolError, RemoteError, RuntimeError) as exc:
+    except (OSError, EOFError, ProtocolError, RemoteError, RuntimeError) as exc:
         print(f"{args.command} failed at {settings.host}:{settings.port}: {exc}", file=sys.stderr)
         return 1
 

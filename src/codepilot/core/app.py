@@ -52,11 +52,12 @@ class OwnedRun:
 
 
 class CoreService:
-    def __init__(self, runner: Runner | None = None, sessions: SessionManager | None = None) -> None:
+    def __init__(self, runner: Runner | None = None, sessions: SessionManager | None = None, *, workspace: Path | None = None) -> None:
         self._runner = runner
         self._jobs: dict[str, OwnedRun] = {}
         self.approvals = ApprovalBroker()
         self.sessions = sessions or (runner.sessions if runner else None)
+        self.workspace = workspace if workspace is not None else runner.workspace if runner else None
 
     async def handle(self, request: Request) -> dict[str, Any]:
         try:
@@ -65,6 +66,11 @@ class CoreService:
             raise RpcFault(exc.code, str(exc)) from exc
 
     async def _handle(self, request: Request) -> dict[str, Any]:
+        if request.method == "core.info":
+            if request.params:
+                raise RpcFault(INVALID_PARAMS, "core.info requires empty params")
+            return {"version": get_version(), "workspace": str(self.workspace) if self.workspace else None,
+                    "model_ready": self._runner is not None}
         if request.method.startswith("session."):
             if self.sessions is None:
                 raise SessionError("Sessions not configured", -32020)
@@ -161,6 +167,7 @@ async def run_core(
     policy: PermissionPolicy | None = None,
     session_dir: Path | None = None,
     mcp_config: McpConfig | None = None,
+    ready: asyncio.Event | None = None,
 ) -> None:
     async with AsyncExitStack() as resources:
         workspace = (workspace or Path.cwd()).resolve(strict=True)
@@ -188,9 +195,11 @@ async def run_core(
                 record_dir=record_dir or (workspace or Path.cwd()) / "artifacts" / "runs",
                 secrets=secrets, sessions=sessions,
             )
-        service = CoreService(runner, sessions)
+        service = CoreService(runner, sessions, workspace=workspace)
         server = SocketServer(service.handle, host=settings.host, port=settings.port)
         await server.start()
+        if ready is not None:
+            ready.set()
         logger.info("Core ready at %s:%s", server.host, server.port)
         try:
             while True:

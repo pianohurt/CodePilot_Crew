@@ -2,46 +2,38 @@
 
 从文档和最小骨架逐阶段开发的本地终端编程 Agent，作为个人学习与展示仓库。仓库名为 `CodePilot_Crew`，Python 包与命令保留 `codepilot`。
 
-工作目录：`G:/实习项目/CodePilot_Crew`。旧 `G:/实习项目/CodePilot` 仅作只读参考；新项目使用独立目录与独立 Git 历史。
-
 ## 当前状态
 
-当前版本为 0.9.0。S8 增加 Markdown Skills，支持三级覆盖、显式参数和本轮工具白名单。
+当前安装包版本为 1.0.0。S9 已完成实现及 Windows 和本机 Ubuntu 离线验收，真实模型重复评测等待配置更新。功能、设计取舍和可复验证据见下文及 [整体评测](EVALUATION.md)。
 
 本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩、流式重试、多 Agent 委派、MCP stdio 和 Markdown Skills。
 
-## 本机安装与演示（Windows PowerShell）
+## 安装与首次运行
 
-需要 uv 和 Python 3.12。`.python-version` 指定 3.12，uv 可使用已有解释器或下载所需版本。本轮使用独立 CPython 3.12.14，不更改系统默认 Python。
+需要 uv、Python 3.12 和 Anthropic Messages 兼容模型。进入仓库根目录运行以下命令。
 
-在本目录安装：
-
-```powershell
-Set-Location G:\实习项目\CodePilot_Crew
+```sh
 uv --cache-dir .cache/uv sync --locked
-uv --cache-dir .cache/uv run --locked codepilot version
+uv --cache-dir .cache/uv run --locked codepilot start
 ```
 
-预期输出 `codepilot 0.9.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
+首次启动时，终端会询问 Base URL、模型名和隐藏输入的 API Key，并将配置写入工作区 `.env`。也可先单独运行 `codepilot setup`，或通过 `--env-file` 指定配置。已有 `.env` 时使用现有配置，向导会拒绝覆盖。环境变量优先于文件。非交互环境请预先配置模型。
 
-第一个终端启动 Core：
+进入工作台后，试用 `/skill review src/codepilot/core/runner.py`。工具区显示调用和子任务，状态区显示步骤、重试和上下文估算。写入审批时可展开核对完整参数，按 F10 或点击“退出”结束工作台。
 
-```powershell
-uv --cache-dir .cache/uv run --locked codepilot core
+`start` 在本机端口探测同版本、同工作区且模型已配置的 Core。空闲时随命令启动 Core，退出时一起关闭。启动参数中的模型配置、权限策略或 MCP 配置需要空闲端口。若发现不匹配的实例，可使用 `--port 17438` 启动另一实例。带目标的 `start "读取 README.md"` 直接输出一次任务结果。
+
+构建 wheel 后可在干净虚拟环境安装，验证版本与启动帮助。
+
+```sh
+uv build --wheel
+uv venv .cache/wheel-check --python 3.12
+uv export --locked --no-dev --no-emit-project --no-hashes --output-file .cache/wheel-constraints.txt
+uv pip install --python .cache/wheel-check --constraint .cache/wheel-constraints.txt dist/codepilot-1.0.0-py3-none-any.whl
+uv run --no-project --python .cache/wheel-check codepilot version
 ```
 
-第二个终端进入同一目录后探活：
-
-```powershell
-Set-Location G:\实习项目\CodePilot_Crew
-uv --cache-dir .cache/uv run --locked codepilot ping
-```
-
-预期输出 `pong`。在第一个终端按 Ctrl+C 停止，然后重新执行 core 和 ping，检验端口释放。S0 的 Core 在前台运行，ping 不自动拉起服务；没有系统服务或自动后台启动。
-
-默认地址为 `127.0.0.1:7438`。端口占用时同时为两个命令指定另一个端口，例如 `core --port 17438` 与 `ping --port 17438`；程序不关闭占用端口的其他进程。
-
-## 运行只读 Agent
+## 分开运行 Core 与客户端
 
 先停止旧版或未配置模型的 Core。在工作区内准备本地配置，已有 .env 时保留它：
 
@@ -300,10 +292,39 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s7.py --skill --file
 | [S0_VALIDATION.md](docs/S0_VALIDATION.md) | 实际命令、结果、故障与未验证项 |
 | [S0_WALKTHROUGH.md](docs/S0_WALKTHROUGH.md) | 以 ping 解释关键函数、状态、错误路径与取舍 |
 
-每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S8。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
+## 架构与设计证据
+
+```mermaid
+flowchart LR
+    Client["CLI 或 TUI"] -->|本地 TCP JSON-RPC| Core["Core 与运行生命周期"]
+    Core --> Runner["Runner 与 AgentLoop"]
+    Runner --> Provider["模型 Provider 与 SSE"]
+    Runner --> Store["SQLite 会话与原始记录"]
+    Runner --> Registry["ToolRegistry"]
+    Registry --> Local["文件、命令与审批"]
+    Registry --> MCP["MCP stdio"]
+    Registry --> Child["子 Agent"]
+    Skills["Markdown Skills"] --> Runner
+```
+
+| 能力 | 实现与复验 |
+|---|---|
+| Agent Loop 与工具边界 | [AgentLoop](src/codepilot/agent/loop.py) · [权限与审批测试](tests/integration/test_s3_approvals.py) |
+| 多 Agent 委派 | [RunTree](src/codepilot/core/delegation.py) · [父子状态及权限测试](tests/integration/test_s6_delegation.py) |
+| 上下文与流式恢复 | [上下文预算](src/codepilot/agent/compact.py) · [断流和单次写入测试](tests/integration/test_s5_stream_retry.py) |
+| MCP 与 Skills | [MCP 适配](src/codepilot/mcp/tools.py) · [Skill 加载与白名单](src/codepilot/skills.py) · [组合验收](scripts/verify_s7.py) |
+
+固定任务集与真实模型重复评测分开保存结果。
+
+```sh
+uv run --locked --offline python scripts/evaluate_s9.py --output artifacts/s9-offline.json
+uv run --locked python scripts/evaluate_s9.py --env-file .env --output artifacts/s9-real.json
+```
+
+每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
 
 ## 参考与开发方式
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-8 用于定位已验收阶段。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。现有阶段标签为 stage-0 至 stage-8。贡献变更请同时给出行为证据，固定响应、真实工具结果与真实模型结果分别记录。

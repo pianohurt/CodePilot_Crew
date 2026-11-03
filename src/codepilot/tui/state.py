@@ -21,6 +21,8 @@ class RunView:
     result: RunResult | None = None
     delta_count: int = 0
     approvals: dict[str, dict] = field(default_factory=dict)
+    context_budget: dict[str, int] = field(default_factory=dict)
+    skill: str = ""
 
     def apply(self, event: RunEvent) -> None:
         if event.run_id != self.run_id or event.seq <= self.seq or self.result is not None:
@@ -29,6 +31,9 @@ class RunView:
         self.step = event.step
         if event.type == "run.started":
             self.goal = str(event.data.get("goal", ""))
+            self.skill = str(event.data.get("skill", ""))
+        elif event.type == "context.ready":
+            self.context_budget = event.data
         elif event.type == "model.retry":
             if event.data["attempt"] > self.attempts.get(event.step, 1):
                 self.attempts[event.step] = event.data["attempt"]

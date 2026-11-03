@@ -154,6 +154,8 @@ async def test_tui_submits_explicit_builtin_debug_command(tmp_path: Path, monkey
                 while app.active_run is None or app.views[app.active_run].result is None:
                     await asyncio.sleep(0.01)
             assert str(app.query_one("#answer", Static).content) == "Debug result"
+            status = str(app.query_one("#status", Static).content)
+            assert "Skill debug" in status and "上下文估算" in status
         prompt = provider.requests[0][-1].content[0].text
         assert "诊断目标" in prompt and "sample.py fails with KeyError" in prompt
         assert provider.exposed == [{"read_file", "list_dir"}]

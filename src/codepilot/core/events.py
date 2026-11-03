@@ -12,6 +12,7 @@ type EventName = Literal[
     "tool.started", "tool.completed", "run.finished",
     "approval.requested", "approval.resolved",
     "agent.spawned", "agent.finished",
+    "context.ready",
 ]
 
 
@@ -28,6 +29,9 @@ class RunEvent(BaseModel):
 
     @model_validator(mode="after")
     def check_payload(self) -> "RunEvent":
+        if self.type == "context.ready":
+            if any(type(self.data.get(name)) is not int or self.data[name] < 0 for name in ("before", "after", "budget", "summaries")):
+                raise ValueError("Invalid context budget metrics")
         if self.type.startswith("agent."):
             if not isinstance(self.data.get("child_run_id"), str) or not self.data["child_run_id"]:
                 raise ValueError("Delegation event requires a child run id")

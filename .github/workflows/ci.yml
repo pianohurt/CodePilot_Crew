@@ -1,4 +1,4 @@
-name: S0 offline checks
+name: Offline regression and wheel smoke test
 
 on: [push, pull_request]
 
@@ -20,3 +20,15 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --locked --offline pytest -q
+      - run: uv run --locked --offline python scripts/evaluate_s9.py --output artifacts/s9-offline.json
+      - name: Install and check the wheel
+        shell: bash
+        run: |
+          uv build --wheel
+          uv venv .cache/ci-wheel --python 3.12
+          uv export --locked --no-dev --no-emit-project --no-hashes --output-file .cache/ci-constraints.txt
+          python=.cache/ci-wheel/bin/python
+          if [[ "$RUNNER_OS" == Windows ]]; then python=.cache/ci-wheel/Scripts/python.exe; fi
+          uv pip install --python "$python" --constraint .cache/ci-constraints.txt dist/codepilot-1.0.0-py3-none-any.whl
+          "$python" -m codepilot.cli version
+          "$python" -m codepilot.cli start --help
