@@ -107,7 +107,8 @@ async def test_mounted_tui_shows_full_preview_and_accepts_once(tmp_path: Path, a
             assert "HEADER" in preview and "END_OF_APPROVAL" in preview
             assert target.read_text(encoding="utf-8") == "before"
             assert not any(event.type == "tool.started" for event in events)
-            await pilot.click("#allow" if allow else "#deny")
+            await pilot.pause()
+            assert await pilot.click("#allow" if allow else "#deny")
             async with asyncio.timeout(3):
                 while view.result is None:
                     await asyncio.sleep(0.01)

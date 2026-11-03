@@ -7,8 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S7 本机 Windows 验收完成，228 项离线检查通过。S7 另有官方 filesystem 服务与真实模型调用复验。Linux 与远端 CI 尚未验证。
-- 当前版本 0.8.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试、多 Agent 委派和 MCP stdio。F10 和“退出”按钮由 c3a9318 引入。
+- S0—S8 本机 Windows 验收完成，239 项离线检查通过。S8 另有项目级 Skill 与官方 filesystem 的真实模型组合复验。Linux 与远端 CI 尚未验证。
+- 当前版本 0.9.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试、多 Agent 委派、MCP stdio 和 Markdown Skills。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,7 +50,7 @@
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
 - S5 在模型输入层压缩历史，存储上限继续适用于完整历史。会话恢复读取上下文并重算摘要。流式重试受单步三次尝试和 run 总时限约束。
-- 命令和配置启动的 MCP 服务以当前用户权限运行。子任务共享工作区，生命周期限于当前根 run。MCP 当前使用 stdio 和启动时发现。下一计划阶段为 S8 Skills。
+- 命令和配置启动的 MCP 服务以当前用户权限运行。子任务共享工作区，生命周期限于当前根 run。MCP 当前使用 stdio 和启动时发现。Skill 白名单按运行生效。下一计划阶段为 S9 展示、安装与整体评测。
 
 ## 启动设计时的文档检查
 
@@ -240,3 +240,14 @@
 - 官方 @modelcontextprotocol/server-filesystem 2.1.0 通过 Node v24.19.0 启动，只公开临时目录的 read_text_file。固定响应和真实 deepseek-flash 均在两步内执行实际读取，最终答案包含临时文件随机标识。证据为 artifacts/s7-external-fixed.json 和 artifacts/s7-external-real.json。[官方 filesystem 服务](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
 - 构建 0.8.0 wheel。独立环境首次离线安装缺少 rpds-py 缓存，按锁定版本补齐后安装 26 个运行时包。48 个 Python 模块在源码、wheel 和安装目录逐字节一致。安装后运行官方服务的固定模型复验，并复跑 S7 与 S3 进程控制共 21 项，全部通过。见 artifacts/s7-installed-fixed.json。
 - stage-7 标记本地验收提交。MCP 工具按启动时发现公开，连接中断需重启 Core。Linux 和远端 CI 尚未验证。
+
+## S8 Markdown Skills
+
+- 起点 stage-7 的 f6b7fe0。只读核对旧仓库 cf6fc3a 的 review.md 和 $ARGUMENTS 约定。新实现选择 JSON front matter，复用 Pydantic 校验并保持依赖版本。内置 review 与 debug 随 wheel 分发。
+- CLI 和 TUI 共用 /skill <name> <argument>。Core 在创建任务和占用会话之前依次解析项目、用户、内置的同名文件。当前层存在但无效时直接报错。Runner 使用已选定的模板和范围，按字面替换完整参数并发送当前用户消息。run.started 记录 skill 和 skill_source。
+- allowed_tools 省略或 null 沿用默认范围，空数组关闭全部工具。显式名单校验已注册工具并收窄本轮范围。模型工具定义与实际执行共用该范围。委派继续和角色、父级及运行策略求交，审批仍走既有流程。运行结束后本轮白名单随上下文释放。
+- 专项 11 项覆盖三个加载来源、Unicode 参数与字面替换、默认与空名单、非法配置零模型请求和零会话占用、子任务越权拒绝，以及实际挂载 TUI 的 debug 命令。
+- 首轮全量为 238 passed、1 failed。旧 S3 审批 UI 用例点击后等待终态超时。测试在点击前等待布局并断言命中按钮，审批与 S8 合并复验 22 项通过。最终 Windows 全量 239 passed in 39.91s，见 artifacts/s8-pytest.txt。
+- S7 验证脚本增加 --skill 模式。临时项目用 review 覆盖内置定义，只开放 mcp__fs__read_text_file。固定响应和真实 deepseek-flash 分别在两步内读到随机文件标识，核对请求中的实际目标与唯一工具名。证据为 artifacts/s8-mcp-fixed.json 和 artifacts/s8-mcp-real.json。
+- 从锁文件离线构建并安装 0.9.0 wheel，26 个运行时包。49 个 Python 模块及 2 个内置 Markdown 文件在源码、wheel 和安装目录逐字节一致。安装环境复跑 11 项 S8 测试及官方服务的固定响应组合通过，见 artifacts/s8-mcp-installed.json。
+- stage-8 标记本地验收提交。当前使用显式命令按运行加载 Skill。Linux 与远端 CI 尚未验证。

@@ -17,6 +17,7 @@ from codepilot.tools.registry import ToolRegistry
 from codepilot.session.history import validate_history
 from codepilot.session.manager import SessionManager, SessionTurn
 from codepilot.session.store import SessionError
+from codepilot.skills import SkillInvocation, prepare_skill
 
 
 class Runner:
@@ -37,6 +38,9 @@ class Runner:
         self._policy = policy or PermissionPolicy()
         self.sessions = sessions
 
+    def prepare_skill(self, goal: str) -> SkillInvocation | None:
+        return prepare_skill(goal, self.workspace, self._tools.names)
+
     async def run(
         self, goal: str, *, max_steps: int = 8, run_id: str | None = None,
         on_event: EventListener | None = None, stream: bool = False,
@@ -44,6 +48,7 @@ class Runner:
         approver: ApprovalCallback | None = None,
         session_id: str | None = None, turn: SessionTurn | None = None,
         _parent_tree: RunTree | None = None, _allowed_tools: frozenset[str] | None = None,
+        _skill: SkillInvocation | None = None,
     ) -> RunResult:
         if not goal.strip() or len(goal) > 8000:
             raise ValueError("Goal must contain 1 to 8000 characters")
@@ -52,6 +57,8 @@ class Runner:
         run_id = run_id or uuid4().hex
         if re.fullmatch(r"[a-f0-9]{32}", run_id) is None:
             raise ValueError("Invalid run id")
+        if _parent_tree is None and _skill is None:
+            _skill = self.prepare_skill(goal)
         if turn is None and session_id is not None:
             if self.sessions is None:
                 raise SessionError("Sessions not configured", -32020)
@@ -61,6 +68,8 @@ class Runner:
         context.approver = approver
         if _allowed_tools is not None:
             context.allowed_tools &= _allowed_tools
+        if _skill is not None and _skill.allowed_tools is not None:
+            context.allowed_tools &= _skill.allowed_tools
         owned_tree = RunTree(self, context) if _parent_tree is None and "spawn_agent" in context.allowed_tools else None
         context.tree = _parent_tree or owned_tree
         if turn is not None:
@@ -82,8 +91,11 @@ class Runner:
             if on_event is not None:
                 remove_event = self.events.subscribe(run_id, on_event)
             try:
-                context.adopt([self.sessions.input_message(turn, goal) if turn else Message(role="user", content=[TextBlock(text=goal)])])
+                prompt = _skill.prompt if _skill is not None else goal
+                context.adopt([self.sessions.input_message(turn, prompt) if turn else Message(role="user", content=[TextBlock(text=prompt)])])
                 start_data = {"goal": goal, "session_id": context.session_id}
+                if _skill is not None:
+                    start_data.update(skill=_skill.name, skill_source=_skill.source)
                 if _parent_tree is not None:
                     start_data["parent_run_id"] = _parent_tree.root.run_id
                 context.events.emit("run.started", **start_data)

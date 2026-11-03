@@ -29,6 +29,7 @@ from codepilot.transport.peer import PeerConnection, current_peer
 from codepilot.session.manager import SessionManager, SessionTurn
 from codepilot.session.store import SessionError, SessionStore
 from codepilot.mcp.config import McpConfig
+from codepilot.skills import SkillError, SkillInvocation
 from codepilot.protocol.messages import SessionCreateParams, SessionListParams, SessionParams
 
 logger = logging.getLogger(__name__)
@@ -111,8 +112,12 @@ class CoreService:
             raise RpcFault(INVALID_PARAMS, "agent.run requires a goal and max_steps in 1..32") from exc
         if self._runner is None:
             raise RpcFault(-32010, "Model not configured; restart core with --env-file .env")
+        try:
+            skill = self._runner.prepare_skill(params.goal)
+        except SkillError as exc:
+            raise RpcFault(INVALID_PARAMS, str(exc)) from exc
         if request.method == "agent.run":
-            return (await self._runner.run(params.goal, max_steps=params.max_steps, session_id=params.session_id)).model_dump()
+            return (await self._runner.run(params.goal, max_steps=params.max_steps, session_id=params.session_id, _skill=skill)).model_dump()
         if len(self._jobs) >= 8:
             raise RpcFault(-32012, "Too many active runs")
         owner = current_peer()
@@ -124,12 +129,15 @@ class CoreService:
             turn = self.sessions.begin(params.session_id, run_id, params.goal)
         job = OwnedRun(owner)
         self._jobs[run_id] = job
-        job.task = asyncio.create_task(self._run_owned(run_id, job, params, turn))
+        job.task = asyncio.create_task(self._run_owned(run_id, job, params, turn, skill))
         owner.own_task(job.task)
         job.task.add_done_callback(lambda task: self._jobs.pop(run_id, None))
         return {"run_id": run_id}
 
-    async def _run_owned(self, run_id: str, job: OwnedRun, params: AgentRunParams, turn: SessionTurn | None = None) -> None:
+    async def _run_owned(
+        self, run_id: str, job: OwnedRun, params: AgentRunParams, turn: SessionTurn | None = None,
+        skill: SkillInvocation | None = None,
+    ) -> None:
         job.started = True
         async def approve(call: ToolUse, preview: dict[str, Any], context: ExecutionContext) -> bool:
             return await self.approvals.request(job.owner, call, preview, context)
@@ -137,7 +145,7 @@ class CoreService:
             await self._runner.run(
                 params.goal, max_steps=params.max_steps, run_id=run_id, stream=True,
                 on_event=job.owner.event, cancel_before_start=job.cancel_requested, approver=approve,
-                turn=turn,
+                turn=turn, _skill=skill,
             )
         except asyncio.CancelledError:
             raise
