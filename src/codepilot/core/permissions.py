@@ -21,6 +21,7 @@ class PermissionPolicy(BaseModel):
     list_dir: Decision = "allow"
     write_file: Decision = "ask"
     bash: Decision = "ask"
+    note_save: Decision = "ask"
 
     def decision(self, name: str) -> Decision:
         return getattr(self, name, "deny")

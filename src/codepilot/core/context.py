@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
+from collections.abc import Callable
+from typing import Any
 
 from codepilot.agent.types import Message, ToolReceipt
 from codepilot.core.events import RunEvents
@@ -24,3 +26,17 @@ class ExecutionContext:
     streaming: bool = False
     policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     approver: ApprovalCallback | None = None
+    session_id: str | None = None
+    journal: Callable[[str, dict[str, Any]], None] | None = None
+    checkpoint: Callable[[list[Message], list[Message]], None] | None = None
+    note_saver: Callable[[str, str], str] | None = None
+
+    def record(self, kind: str, **data: Any) -> None:
+        if self.journal:
+            self.journal(kind, {"step": self.step, **data})
+
+    def adopt(self, delta: list[Message]) -> None:
+        history = self.messages + delta
+        if self.checkpoint:
+            self.checkpoint(history, delta)
+        self.messages = history

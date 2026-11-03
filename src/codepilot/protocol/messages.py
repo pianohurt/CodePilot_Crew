@@ -50,6 +50,19 @@ class PingResult(StrictMessage):
 class AgentRunParams(StrictMessage):
     goal: Annotated[str, Field(min_length=1, max_length=8000)]
     max_steps: Annotated[int, Field(ge=1, le=32)] = 8
+    session_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")] | None = None
+
+
+class SessionParams(StrictMessage):
+    session_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
+
+
+class SessionCreateParams(StrictMessage):
+    title: Annotated[str, Field(min_length=1, max_length=160)] = "新会话"
+
+
+class SessionListParams(StrictMessage):
+    limit: Annotated[int, Field(ge=1, le=50)] = 50
 
 
 class CancelParams(StrictMessage):

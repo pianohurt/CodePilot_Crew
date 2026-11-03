@@ -28,8 +28,11 @@ async def ping(settings: Settings) -> None:
     print(pong.message)
 
 
-async def run_agent(settings: Settings, goal: str, max_steps: int, as_json: bool) -> int:
-    raw = await request(settings.host, settings.port, "agent.run", {"goal": goal, "max_steps": max_steps}, timeout=settings.timeout)
+async def run_agent(settings: Settings, goal: str, max_steps: int, as_json: bool, session_id: str | None = None) -> int:
+    params = {"goal": goal, "max_steps": max_steps}
+    if session_id:
+        params["session_id"] = session_id
+    raw = await request(settings.host, settings.port, "agent.run", params, timeout=settings.timeout)
     try:
         result = RunResult.model_validate(raw)
     except ValidationError as exc:
@@ -57,6 +60,7 @@ def main() -> int:
     core.add_argument("--env-file", type=Path)
     core.add_argument("--record-dir", type=Path)
     core.add_argument("--policy-file", type=Path)
+    core.add_argument("--session-dir", type=Path)
     probe = commands.add_parser("ping", help="探活已有 Core，不自动启动")
     probe.add_argument("--port", type=int)
     probe.add_argument("--timeout", type=float)
@@ -66,9 +70,19 @@ def main() -> int:
     run.add_argument("--timeout", type=float)
     run.add_argument("--max-steps", type=int, default=8)
     run.add_argument("--json", action="store_true")
+    run.add_argument("--session", dest="session_id")
     tui = commands.add_parser("tui", help="连接已有 Core 并打开终端工作台")
     tui.add_argument("--port", type=int)
     tui.add_argument("--timeout", type=float)
+    tui.add_argument("--session", dest="session_id")
+    for name in ("sessions", "session-new", "resume"):
+        command = commands.add_parser(name, help="列出、新建或查看待恢复会话")
+        command.add_argument("--port", type=int)
+        command.add_argument("--timeout", type=float)
+        if name == "session-new":
+            command.add_argument("--title", default="新会话")
+        elif name == "resume":
+            command.add_argument("session_id")
     args = parser.parse_args()
     if args.command == "version":
         print(f"codepilot {get_version()}")
@@ -99,11 +113,16 @@ def main() -> int:
     try:
         if args.command == "tui":
             from codepilot.tui.app import CodePilotApp
-            CodePilotApp(settings).run()
+            CodePilotApp(settings, session_id=args.session_id).run()
+            return 0
+        if args.command in {"sessions", "session-new", "resume"}:
+            method, params = {"sessions": ("session.list", {}), "session-new": ("session.create", {"title": getattr(args, "title", "新会话")}), "resume": ("session.resume", {"session_id": getattr(args, "session_id", "")})}[args.command]
+            result = asyncio.run(request(settings.host, settings.port, method, params, timeout=settings.timeout))
+            print(json.dumps(result, ensure_ascii=False))
             return 0
         if args.command == "run":
-            return asyncio.run(run_agent(settings, args.goal, args.max_steps, args.json))
-        asyncio.run(run_core(settings, workspace=args.workspace, model=model, record_dir=args.record_dir, policy=policy) if args.command == "core" else ping(settings))
+            return asyncio.run(run_agent(settings, args.goal, args.max_steps, args.json, args.session_id))
+        asyncio.run(run_core(settings, workspace=args.workspace, model=model, record_dir=args.record_dir, policy=policy, session_dir=args.session_dir) if args.command == "core" else ping(settings))
         return 0
     except KeyboardInterrupt:
         return 0 if args.command == "core" else 1

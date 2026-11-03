@@ -7,11 +7,12 @@ from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Static
+from textual.widgets import Button, Footer, Header, Input, Select, Static
 
 from codepilot.core.config import Settings
 from codepilot.transport.rpc import RpcClient
 from codepilot.tui.state import RunView
+from codepilot.transport.client import RemoteError
 
 
 class CodePilotApp(App[None]):
@@ -25,6 +26,9 @@ class CodePilotApp(App[None]):
     CSS = """
     Screen { padding: 1 2; }
     #controls { height: 3; }
+    #session-controls { height: 3; }
+    #sessions { width: 1fr; }
+    #session-status { height: 1; }
     #goal { width: 1fr; }
     Button { margin-left: 1; min-width: 10; }
     #status { height: 2; color: $accent; }
@@ -35,7 +39,7 @@ class CodePilotApp(App[None]):
     #approval-buttons { height: 3; }
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, session_id: str | None = None) -> None:
         super().__init__()
         self.settings = settings
         self.client = RpcClient(settings.host, settings.port, timeout=settings.timeout)
@@ -44,10 +48,18 @@ class CodePilotApp(App[None]):
         self._connected = False
         self._launching = False
         self._consumer: asyncio.Task[None] | None = None
+        self.session_id = session_id
+        self._session_supported = False
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("连接中…", id="status")
+        with Horizontal(id="session-controls"):
+            yield Select([], prompt="选择要恢复的会话", id="sessions")
+            yield Button("刷新", id="refresh-sessions")
+            yield Button("恢复", id="resume-session")
+            yield Button("新会话", id="new-session")
+        yield Static("", id="session-status", markup=False)
         with Horizontal(id="controls"):
             yield Input(placeholder="输入任务，例如：定位错误、提出修改并运行检查", id="goal")
             yield Button("开始", id="start", variant="primary", disabled=True)
@@ -71,9 +83,26 @@ class CodePilotApp(App[None]):
             await self.client.connect()
             await self.client.call("core.ping", {})
             self._connected = True
+            try:
+                summary = await self.client.call("session.resume", {"session_id": self.session_id}) if self.session_id else await self.client.call("session.create", {})
+                self._session_supported = True
+                self._select_session(summary)
+                await self.refresh_sessions()
+            except RemoteError as exc:
+                if exc.code != -32020 or self.session_id is not None:
+                    raise
+                self.query_one("#session-controls", Horizontal).display = False
+                self.query_one("#session-status", Static).display = False
             self.query_one("#status", Static).update("已连接 · 等待目标")
             self.query_one("#start", Button).disabled = False
             self._consumer = asyncio.create_task(self._consume())
+        except RemoteError:
+            if self._connected:
+                self._consumer = asyncio.create_task(self._consume())
+                await self.refresh_sessions()
+                self.query_one("#status", Static).update("会话恢复失败：记录不存在、损坏或正在运行；可选择其他会话或新建")
+            else:
+                self.query_one("#status", Static).update("连接失败，请先启动 Core")
         except Exception:
             self.query_one("#status", Static).update("连接失败，请先启动 Core")
 
@@ -112,6 +141,9 @@ class CodePilotApp(App[None]):
         self.query_one("#goal", Input).disabled = busy
         self.query_one("#start", Button).disabled = busy or self._launching or not self._connected
         self.query_one("#cancel", Button).disabled = not busy
+        for control in ("#refresh-sessions", "#resume-session", "#new-session"):
+            self.query_one(control, Button).disabled = busy or not self._connected
+        self.query_one("#sessions", Select).disabled = busy or not self._connected
         pending = next(iter(view.approvals.values()), None)
         self.query_one("#approval-pane", Vertical).display = pending is not None
         if pending is not None:
@@ -137,8 +169,48 @@ class CodePilotApp(App[None]):
             await self.action_cancel_run()
         elif event.button.id == "quit":
             await self.action_quit()
+        elif event.button.id == "refresh-sessions":
+            await self.refresh_sessions()
+        elif event.button.id in {"new-session", "resume-session"}:
+            await self.change_session(event.button.id == "new-session")
         elif event.button.id in {"allow", "deny"}:
             await self.respond_approval(event.button.id == "allow")
+
+    def _select_session(self, summary: dict) -> None:
+        self.session_id = summary["id"]
+        self.active_run = None
+        self.query_one("#start", Button).disabled = not self._connected
+        self.query_one("#goal", Input).disabled = False
+        self.query_one("#session-status", Static).update(f"会话 {self.session_id} · {summary['title']} · {summary['status']}")
+        result = summary.get("last_result")
+        text = result["answer"] if result and result["status"] == "success" else (result.get("error") or "尚无已完成回答") if result else "新会话 · 等待目标"
+        self.query_one("#answer", Static).update(text)
+        self.query_one("#tools", Static).update("已恢复保存的上下文；不重放旧工具动作。")
+
+    async def refresh_sessions(self) -> None:
+        if not self._connected:
+            return
+        try:
+            result = await self.client.call("session.list", {})
+            self.query_one("#sessions", Select).set_options([(f"{item['title']} · {item['status']} · {item['id'][:8]}", item["id"]) for item in result["sessions"]])
+        except Exception:
+            self.query_one("#status", Static).update("会话列表读取失败")
+
+    async def change_session(self, create: bool) -> None:
+        previous = self.views.get(self.active_run)
+        if not self._connected or self._launching or (previous and previous.result is None):
+            return
+        selected = self.query_one("#sessions", Select).value
+        if not create and selected is Select.BLANK:
+            self.query_one("#status", Static).update("请先选择要恢复的会话")
+            return
+        try:
+            summary = await self.client.call("session.create", {}) if create else await self.client.call("session.resume", {"session_id": selected})
+            self._select_session(summary)
+            await self.refresh_sessions()
+            self.query_one("#status", Static).update("会话已就绪 · 等待目标")
+        except Exception:
+            self.query_one("#status", Static).update("会话不可恢复：可能正在运行或记录损坏")
 
     async def respond_approval(self, allow: bool) -> None:
         view = self.views.get(self.active_run)
@@ -165,7 +237,10 @@ class CodePilotApp(App[None]):
         self._launching = True
         self.query_one("#start", Button).disabled = True
         try:
-            response = await self.client.call("agent.start", {"goal": goal})
+            params = {"goal": goal}
+            if self.session_id:
+                params["session_id"] = self.session_id
+            response = await self.client.call("agent.start", params)
             self.active_run = response["run_id"]
             self.views.setdefault(self.active_run, RunView(self.active_run, goal=goal))
         except Exception as exc:

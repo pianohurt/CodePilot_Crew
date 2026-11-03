@@ -13,7 +13,7 @@ from codepilot.tools.registry import ToolError, ToolRegistry
 
 MAX_FILE_BYTES = 128 * 1024
 MAX_DIRECTORY_ENTRIES = 100
-BLOCKED_PARTS = frozenset({".git", ".venv", ".cache"})
+BLOCKED_PARTS = frozenset({".git", ".venv", ".cache", ".codepilot"})
 
 
 def restricted(parts: tuple[str, ...]) -> bool:

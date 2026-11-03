@@ -41,6 +41,7 @@ class AgentLoop:
             logger.info("Model request run_id=%s step=%s", context.run_id, step)
             messages = tuple(item.model_copy(deep=True) for item in context.messages)
             definitions = self._tools.definitions(context.allowed_tools)
+            context.record("model.request", messages=[item.model_dump() for item in messages], tools=[item.model_dump() for item in definitions])
             if context.recorder:
                 context.recorder.trace("model.request", step, messages=[item.model_dump() for item in messages], tools=[item.model_dump() for item in definitions])
             started = perf_counter()
@@ -54,10 +55,12 @@ class AgentLoop:
                 else:
                     response = await self._provider.complete(messages, definitions)
             except asyncio.CancelledError:
+                context.record("model.cancelled")
                 if context.recorder:
                     context.recorder.trace("model.cancelled", step, elapsed_ms=round((perf_counter() - started) * 1000, 3))
                 raise
             except ProviderError as exc:
+                context.record("model.error", error=str(exc))
                 if context.recorder:
                     context.recorder.trace("model.error", step, error=str(exc), elapsed_ms=round((perf_counter() - started) * 1000, 3))
                 reason = "invalid_response" if exc.invalid_response else "provider_error"
@@ -67,6 +70,7 @@ class AgentLoop:
                     context.recorder.trace("model.error", step, error="Provider failed unexpectedly", elapsed_ms=round((perf_counter() - started) * 1000, 3))
                 return finish(context, "provider_error", error="Provider failed unexpectedly")
             calls = [item for item in response.content if isinstance(item, ToolUse)]
+            context.record("model.response", response=response.model_dump())
             text = "\n".join(item.text for item in response.content if isinstance(item, TextBlock))
             if context.recorder:
                 context.recorder.trace("model.response", step, response=response.model_dump(), usage=response.usage, elapsed_ms=round((perf_counter() - started) * 1000, 3))
@@ -80,7 +84,7 @@ class AgentLoop:
             if response.stop_reason == "end_turn":
                 if calls or not text.strip():
                     return finish(context, "invalid_response", error="Final response contains calls or no answer")
-                context.messages.append(Message(role="assistant", content=response.content))
+                context.adopt([Message(role="assistant", content=response.content)])
                 return finish(context, "end_turn", answer=text)
             if response.stop_reason != "tool_use":
                 return finish(context, "unsupported_stop_reason", error="Unsupported model stop reason")
@@ -97,13 +101,16 @@ class AgentLoop:
             context.used_tool_ids.update(ids)
             results = []
             for call in calls:
+                context.record("tool.intent", call=call.model_dump())
                 logger.info("Tool run_id=%s step=%s tool_use_id=%s name=%s", context.run_id, step, call.id, call.name)
                 try:
                     result = await self._tools.execute(call, context)
                 except asyncio.CancelledError:
+                    context.record("tool.cancelled", tool_use_id=call.id, name=call.name, message="Side effects may already have occurred")
                     if context.events:
                         context.events.emit("tool.completed", step=step, tool_use_id=call.id, name=call.name, content="动作等待或执行已取消；已发生的副作用不自动回滚", is_error=True)
                     raise
+                context.record("tool.result", result=result.model_dump())
                 if context.events:
                     context.events.emit("tool.completed", step=step, tool_use_id=call.id, name=call.name, content=bounded_text(result.content, 4096), is_error=result.is_error)
                 results.append(result)
@@ -111,7 +118,7 @@ class AgentLoop:
                 if result.stop_run:
                     return finish(context, "tool_cleanup_failed", error=result.content)
             # 整批结束后再采用这对消息；总超时或取消不会留下半批工作历史。
-            context.messages.extend([
+            context.adopt([
                 Message(role="assistant", content=response.content),
                 Message(role="user", content=results),
             ])

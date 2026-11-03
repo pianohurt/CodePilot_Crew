@@ -7,9 +7,9 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S3 本机 Windows 验收完成；164 项离线测试通过，独立安装后的固定响应与真实 deepseek-flash 修复案例分别通过。用户已推送 S1，本轮 S2/S3 均未 push；S4—S9 未开始，Linux 和远端 CI 本轮未验证。
-- 当前版本 0.4.0，已有 Agent、真实 SSE、连接事件、启动/取消、JSONL、Textual，以及受控写入/命令、三态权限和逐次审批。
-- 用户反馈 VS Code 拦截 Ctrl+Q 后，TUI 退出入口改为 F10 和“退出”按钮；相关验证与边界见下方修复记录，未进入 S4。
+- S0—S3 本机 Windows 验收完成；S4 实现与行为验证通过，最终安装/真实验收进行中。用户已推送 S1，后续本地提交没有自动 push；S5—S9 未开始，Linux 和远端 CI 本轮未验证。
+- 当前版本 0.5.0，已有会话列表/恢复、独立原始记录、会话笔记和背景文件；保留 Agent、SSE、JSONL、Textual、写入/命令、三态权限和逐次审批。
+- VS Code 退出键冲突修复 c3a9318 已保留：F10 和“退出”按钮；本轮基于该干净起点实施用户指定的 S4。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,8 +50,8 @@
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
-- S3 已有写入/命令和审批；仍没有会话恢复、压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的等待及普通命令进程树，不保证强制中断所有底层只读 I/O。
-- 本轮由用户指定实施 S3，不自动开始 S4 或 push。命令以当前用户权限运行，应用层审批与 cwd 检查不提供操作系统隔离。
+- S4 已有保存上下文后的会话继续交互；仍没有压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的等待及普通命令进程树，不保证强制中断所有底层只读 I/O。
+- 本轮由用户指定实施 S4，不自动开始 S5 或 push。命令以当前用户权限运行；会话恢复不重放工具或恢复命令进程，应用层审批与 cwd 检查不提供操作系统隔离。
 
 ## 启动设计时的文档检查
 
@@ -172,3 +172,19 @@
 - 实际验证命令：`uv run --locked --offline pytest -q -p no:cacheprovider --basetemp <工作区内已核验的独立目录> tests/integration/test_s2_tui.py tests/integration/test_s3_approvals.py`，18 passed in 4.41s，无跳过。覆盖输入框聚焦/连接失败时退出、流式运行中按键与按钮退出、等待写入审批时退出、任务/审批清理及退出后新连接 ping；待审批文件保持原内容，模型没有进入下一次请求。
 - 这是实际挂载 Textual 的离线自动化与真实 TCP 验证，按键由 Pilot 注入；未新增真实模型调用，未执行当前 VS Code 的人工按键验证。本轮只运行上述相关测试，S3 的 164 项全套通过记录属于前次验收。
 - README 已同步快捷键、备用按钮与宿主拦截原因。修复作为独立本地提交保存，保留现有阶段标签和版本 0.4.0，不 push。
+
+## S4 实施记录：实现与行为验证
+
+- 起点 c3a9318，工作树干净，用户说明退出键调整后授权 S4。F10/退出按钮及原取消语义保留；只在独立新仓库实施，不进入 S5，不 push。
+- 设计见本地 S4_DESIGN.md。采用 Python 标准库 SQLite，无新增依赖；sessions 保存会话元信息、工作快照和笔记，runs 保存任务引用/结果/用量，records 用 run_id+seq 保存原始领域增量。查阅 Python 3.12 sqlite3 与 SQLite transaction 官方文档，没有直接复用参考仓库代码。
+- ExecutionContext.adopt 显式提交新增消息与工作快照；原始模型请求/完整响应、工具意图、结果和取消独立追加，不通过 messages 长度推算保存游标。写入及读回均检查工具配对；取消半批保留实际动作原始记录，工作快照只采用完整消息批次。
+- SessionManager 在 agent.start 返回前占用会话名额，同会话并发 -32022，不同会话独立；session.create/list/resume、CLI sessions/session-new/resume、run/tui --session 与 TUI 新建/列表/恢复均接入。查看/恢复不调用模型或重放动作。
+- 默认 .codepilot/ 被 Git 和普通文件工具排除；同数据目录的 owner SQLite EXCLUSIVE 事务保证一个 Core，退出释放锁。数据库事务不跨模型/审批等待。启动恢复将 running 标记 interrupted，提示重新检查实际副作用；正常取消/失败也保留提示。损坏会话显示 corrupt，其他会话可用；物理库损坏不静默重建。最终状态提交失败时暂禁该会话继续，等待重启核查。
+- CODEPILOT.md 作为有限 UTF-8 背景进入每次会话请求；显式 note_save 默认 ask，保存本会话最多 20 条、每条 4000 字符，完整预览后批准。同 key 替换，不跨会话默认共享；权限不因文字放宽。
+- 私有库保留完整 opaque thinking/signature 以兼容模型恢复，UI/Trace/导出演示证据省略正文。与 S1/S2 当时仅内存透传的历史边界不同；配置 API Key 在持久字段中替换，不保存 HTTP 头。数据库可能含源码和对话，未加密；领域原始记录不是 HTTP/SSE 字节日志。
+- 原有 169 项（含退出修复）回归通过。新存储专项首轮 16 passed；新 RPC/TUI 首轮 2 passed/1 failed，测试误用旧 run 的完成状态，修正等待新 run_id。全套后出现同名测试模块收集冲突，分别命名 test_s4_store/test_s4_sessions；另发现 Textual Button 的 0.2 秒防连点影响瞬时重复点击，连续追问改用输入框 Enter 验证，不为自动化修改产品防连点逻辑。
+- 补齐启动指定坏会话的提示与新建入口：缺失/损坏不会误报成网络失败，零模型调用即可新建恢复可用状态。最终命令 `uv run --locked --offline pytest -q -p no:cacheprovider --basetemp <工作区内已核验目录>`：195 passed in 29.44s，无跳过；证据 artifacts/s4-pytest.txt。
+- 开发与初步独立安装的固定案例：第一进程读实际随机标记并完成 2 步；停止并删除源文件，第二进程列出/恢复后 1 步回答相同标记，无工具调用，实际请求包含前轮 tool_result。固定文本预设，只证明链路。额外使用 os._exit(23) 直接结束测试 Core，重启后 interrupted，已写文件内容/mtime 不变，没有重放。
+- 初步独立安装的真实 deepseek-flash：第一轮 2 步读取随机标记，第二个 Core 进程恢复后 1 步回答；原文件已删除，新请求含前次观察，恢复轮工具数 0。随后只修复初始坏会话提示；最终安装回归在收尾节点记录。
+- Windows 0.5.0 真实 CTRL_C_EVENT：端口 60919，两次退出均 0，耗时 0.360/0.406 秒，活动连接结束、存储锁释放后同端口重启成功。非人工键盘演示，也不作为崩溃后命令资源回收的证据。
+- 已讲解 session 跨 run、工作快照与原始增量分工、审批笔记进入下轮请求以及中断不重放。安装、最终证据检查、讲解文档和 stage-4 在验收节点收尾。
