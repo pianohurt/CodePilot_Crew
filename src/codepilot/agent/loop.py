@@ -98,18 +98,18 @@ class AgentLoop:
             results = []
             for call in calls:
                 logger.info("Tool run_id=%s step=%s tool_use_id=%s name=%s", context.run_id, step, call.id, call.name)
-                if context.events:
-                    context.events.emit("tool.started", step=step, tool_use_id=call.id, name=call.name, input=call.input)
                 try:
                     result = await self._tools.execute(call, context)
                 except asyncio.CancelledError:
                     if context.events:
-                        context.events.emit("tool.completed", step=step, tool_use_id=call.id, name=call.name, content="工具等待已取消；底层只读 I/O 可能仍在结束", is_error=True)
+                        context.events.emit("tool.completed", step=step, tool_use_id=call.id, name=call.name, content="动作等待或执行已取消；已发生的副作用不自动回滚", is_error=True)
                     raise
                 if context.events:
                     context.events.emit("tool.completed", step=step, tool_use_id=call.id, name=call.name, content=bounded_text(result.content, 4096), is_error=result.is_error)
                 results.append(result)
                 context.receipts.append(ToolReceipt(step=step, tool_use_id=call.id, name=call.name, is_error=result.is_error))
+                if result.stop_run:
+                    return finish(context, "tool_cleanup_failed", error=result.content)
             # 整批结束后再采用这对消息；总超时或取消不会留下半批工作历史。
             context.messages.extend([
                 Message(role="assistant", content=response.content),

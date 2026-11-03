@@ -37,6 +37,7 @@ class ToolResult(StrictData):
     tool_use_id: CallId
     content: str
     is_error: bool = False
+    stop_run: bool = Field(default=False, exclude=True)
 
 
 type AssistantBlock = Annotated[TextBlock | ThinkingBlock | ToolUse, Field(discriminator="type")]

@@ -10,6 +10,7 @@ from codepilot.agent.types import RunResult
 type EventName = Literal[
     "run.started", "step.started", "model.started", "model.delta", "model.completed",
     "tool.started", "tool.completed", "run.finished",
+    "approval.requested", "approval.resolved",
 ]
 
 
@@ -37,6 +38,13 @@ class RunEvent(BaseModel):
             result = RunResult.model_validate(self.data.get("result"))
             if result.run_id != self.run_id:
                 raise ValueError("Result belongs to another run")
+        if self.type.startswith("approval."):
+            if not self.tool_use_id or not isinstance(self.data.get("approval_id"), str):
+                raise ValueError("Approval requires approval and tool call ids")
+            if self.type == "approval.requested" and (not isinstance(self.data.get("name"), str) or not isinstance(self.data.get("parameters"), dict)):
+                raise ValueError("Approval requires actual parameters")
+            if self.type == "approval.resolved" and self.data.get("status") not in {"allowed", "denied", "timeout", "cancelled"}:
+                raise ValueError("Invalid approval state")
         return self
 
 

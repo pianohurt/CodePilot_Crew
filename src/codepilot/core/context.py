@@ -7,6 +7,7 @@ from uuid import uuid4
 from codepilot.agent.types import Message, ToolReceipt
 from codepilot.core.events import RunEvents
 from codepilot.core.records import RunRecorder
+from codepilot.core.permissions import ApprovalCallback, PermissionPolicy
 
 
 @dataclass
@@ -21,3 +22,5 @@ class ExecutionContext:
     events: RunEvents | None = None
     recorder: RunRecorder | None = None
     streaming: bool = False
+    policy: PermissionPolicy = field(default_factory=PermissionPolicy)
+    approver: ApprovalCallback | None = None

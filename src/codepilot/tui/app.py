@@ -1,11 +1,12 @@
 """一块回答持续更新，工具详情单独展示；所有界面状态来自协议。"""
 
 import asyncio
+import json
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, Static
 
 from codepilot.core.config import Settings
@@ -14,7 +15,7 @@ from codepilot.tui.state import RunView
 
 
 class CodePilotApp(App[None]):
-    TITLE = "CodePilot Crew · 只读工作台"
+    TITLE = "CodePilot Crew · 编程工作台"
     BINDINGS: ClassVar = [Binding("ctrl+q", "quit", "退出", priority=True), Binding("ctrl+c", "cancel_run", "取消运行", priority=True)]
     CSS = """
     Screen { padding: 1 2; }
@@ -24,6 +25,9 @@ class CodePilotApp(App[None]):
     #status { height: 2; color: $accent; }
     #answer-pane { height: 2fr; border: round $accent; padding: 1; }
     #tools-pane { height: 1fr; border: round $secondary; padding: 1; }
+    #approval-pane { display: none; height: 16; border: heavy $warning; padding: 1; }
+    #approval-details { height: 1fr; }
+    #approval-buttons { height: 3; }
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -40,13 +44,20 @@ class CodePilotApp(App[None]):
         yield Header()
         yield Static("连接中…", id="status")
         with Horizontal(id="controls"):
-            yield Input(placeholder="输入只读任务，例如：读取 README.md 并概括", id="goal")
+            yield Input(placeholder="输入任务，例如：定位错误、提出修改并运行检查", id="goal")
             yield Button("开始", id="start", variant="primary", disabled=True)
             yield Button("取消", id="cancel", disabled=True)
         with VerticalScroll(id="answer-pane"):
             yield Static("提交目标后显示模型进度与回答。", id="answer", markup=False)
         with VerticalScroll(id="tools-pane"):
             yield Static("工具调用与结果将在这里显示。", id="tools", markup=False)
+        with Vertical(id="approval-pane"):
+            yield Static("等待你的本次授权 · 请核对完整参数", markup=False)
+            with VerticalScroll(id="approval-details"):
+                yield Static("", id="approval", markup=False)
+            with Horizontal(id="approval-buttons"):
+                yield Button("允许本次", id="allow", variant="warning")
+                yield Button("拒绝本次", id="deny")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -80,6 +91,8 @@ class CodePilotApp(App[None]):
                 self.query_one("#status", Static).update("连接断开 · 已确认结果保留" if completed and completed.result else "连接断开 · 运行结果未确认")
                 self.query_one("#start", Button).disabled = True
                 self.query_one("#cancel", Button).disabled = True
+                self.query_one("#allow", Button).disabled = True
+                self.query_one("#deny", Button).disabled = True
 
     def _render_run(self) -> None:
         view = self.views.get(self.active_run)
@@ -93,6 +106,20 @@ class CodePilotApp(App[None]):
         self.query_one("#goal", Input).disabled = busy
         self.query_one("#start", Button).disabled = busy or self._launching or not self._connected
         self.query_one("#cancel", Button).disabled = not busy
+        pending = next(iter(view.approvals.values()), None)
+        self.query_one("#approval-pane", Vertical).display = pending is not None
+        if pending is not None:
+            parameters = dict(pending["parameters"])
+            body = parameters.pop("content", None)
+            script = parameters.pop("effective_script", None)
+            text = json.dumps({"tool": pending["name"], **parameters}, ensure_ascii=False, indent=2)
+            if body is not None:
+                text += "\n\n完整写入内容：\n" + body
+            if script is not None:
+                text += "\n\n实际执行脚本：\n" + script
+            self.query_one("#approval", Static).update(text)
+            self.query_one("#allow", Button).disabled = not self._connected
+            self.query_one("#deny", Button).disabled = not self._connected
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         await self.start_run()
@@ -100,8 +127,22 @@ class CodePilotApp(App[None]):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "start":
             await self.start_run()
-        else:
+        elif event.button.id == "cancel":
             await self.action_cancel_run()
+        elif event.button.id in {"allow", "deny"}:
+            await self.respond_approval(event.button.id == "allow")
+
+    async def respond_approval(self, allow: bool) -> None:
+        view = self.views.get(self.active_run)
+        if view is None or not view.approvals or not self._connected:
+            return
+        approval_id = next(iter(view.approvals))
+        self.query_one("#allow", Button).disabled = True
+        self.query_one("#deny", Button).disabled = True
+        try:
+            await self.client.call("approval.respond", {"approval_id": approval_id, "allow": allow})
+        except Exception:
+            self.query_one("#status", Static).update("审批未接受或已过期")
 
     async def start_run(self) -> None:
         if not self._connected or self._launching:

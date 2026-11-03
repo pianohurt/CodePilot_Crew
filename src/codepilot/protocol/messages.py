@@ -56,6 +56,11 @@ class CancelParams(StrictMessage):
     run_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 
 
+class ApprovalResponseParams(StrictMessage):
+    approval_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
+    allow: bool
+
+
 RESPONSE = TypeAdapter(Success | Failure)
 
 

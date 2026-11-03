@@ -11,6 +11,7 @@ from codepilot.agent.types import Message, RunResult, TextBlock
 from codepilot.core.context import ExecutionContext
 from codepilot.core.events import EventBus, EventListener, RunEvents
 from codepilot.core.records import RunRecorder
+from codepilot.core.permissions import ApprovalCallback, PermissionPolicy
 from codepilot.tools.registry import ToolRegistry
 
 
@@ -18,6 +19,7 @@ class Runner:
     def __init__(
         self, provider: Provider, tools: ToolRegistry, workspace: Path, *, run_timeout: float = 90.0,
         record_dir: Path | None = None, secrets: tuple[str, ...] = (),
+        policy: PermissionPolicy | None = None,
     ) -> None:
         self.workspace = workspace.resolve(strict=True)
         if not self.workspace.is_dir():
@@ -27,11 +29,13 @@ class Runner:
         self._run_timeout = run_timeout
         self.events = EventBus()
         self._record_dir, self._secrets = record_dir, secrets
+        self._policy = policy or PermissionPolicy()
 
     async def run(
         self, goal: str, *, max_steps: int = 8, run_id: str | None = None,
         on_event: EventListener | None = None, stream: bool = False,
         cancel_before_start: bool = False,
+        approver: ApprovalCallback | None = None,
     ) -> RunResult:
         if not goal.strip() or len(goal) > 8000:
             raise ValueError("Goal must contain 1 to 8000 characters")
@@ -41,6 +45,7 @@ class Runner:
         if re.fullmatch(r"[a-f0-9]{32}", run_id) is None:
             raise ValueError("Invalid run id")
         context = ExecutionContext(workspace=self.workspace, allowed_tools=self._tools.names, run_id=run_id, streaming=stream)
+        context.policy, context.approver = self._policy, approver
         context.events = RunEvents(self.events, run_id)
         remove_record = lambda: None
         remove_event = lambda: None

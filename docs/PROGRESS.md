@@ -7,8 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S2 实现、验证与讲解完成，本机 Windows 验收通过；用户已推送 S1，本轮 S2 未 push；S3—S9 未开始，Linux 和远端 CI 本轮未验证。
-- 当前版本 0.3.0，已有只读 Agent、真实 SSE、单连接响应/事件多路复用、启动/取消、JSONL 记录与基础 Textual TUI。
+- S0—S2 本机 Windows 验收完成；S3 实现与 164 项离线测试通过，独立安装验收进行中。用户已推送 S1，本轮未 push；S4—S9 未开始，Linux 和远端 CI 本轮未验证。
+- 当前版本 0.4.0，已有 Agent、真实 SSE、连接事件、启动/取消、JSONL、Textual，以及受控写入/命令、三态权限和逐次审批。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -49,8 +49,8 @@
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
-- S2 已有事件流和 TUI；仍没有写入/命令、会话恢复、压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的协程等待，不保证强制中断所有底层只读 I/O。
-- S2 已完成，等待用户指定 S3，不自动开始后续阶段或 push。
+- S3 已有写入/命令和审批；仍没有会话恢复、压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的等待及普通命令进程树，不保证强制中断所有底层只读 I/O。
+- 本轮由用户指定实施 S3，不自动开始 S4 或 push。命令以当前用户权限运行，应用层审批与 cwd 检查不提供操作系统隔离。
 
 ## 启动设计时的文档检查
 
@@ -135,3 +135,18 @@
 - 新增本地 S2_DESIGN、S2_VALIDATION、S2_WALKTHROUGH，README 更新 TUI 启动/取消/记录与验证命令。证据与 SVG 截图保存在 artifacts/，密钥、运行记录和新增分析文档不进入提交。
 - 已围绕一次读取讲解请求 id/Future、run_id/step、增量与最终替换、取消确认及日志/事件/Trace 的区别。阶段到此，等待用户指定 S3。
 - 收尾检查：14 份 Markdown、29 个本地链接、围栏与 JSON 示例有效；0.3.0 wheel 全部 Python 模块与当前源码一致，不含配置/缓存/字节码；4 份 SVG 可解析，4 个演示的 228 条事件通过类型、seq 和最终状态检查；已跟踪内容及证据未检出配置密钥。新阶段分析、.env、运行记录均被忽略，`git diff --check` 通过。旧 CodePilot 工作树干净、HEAD 仍为 75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35。
+
+## S3 实施记录：实现与行为验证
+
+- 用户指定“S2 结束后执行 S3”；从 stage-2=3bda015 的干净工作树开始，仅实施 S3。设计见本地 S3_DESIGN.md，保留用户 docs/ 忽略规则，不自动 push。
+- ToolRegistry 统一执行参数校验、deny 拦截、无副作用预检、allow/ask、tool.started 和受限执行；读取默认 allow，write_file/bash 默认 ask。PermissionPolicy 由 Core 注入，客户端/模型不能放宽。CLI agent.run 无审批通道时 ask 返回 approval_unavailable。
+- ApprovalBroker 将逐次 Future 绑定连接，approval.respond 只接受所属连接答复；拒绝、60 秒超时、取消和断连均结束等待，旧审批失效。TUI 展示完整写入正文或实际 shell 脚本，实际点击允许/拒绝有挂载测试；工具开始事件晚于批准。
+- write_file：UTF-8 最多 12 KiB、已有父目录、显式 overwrite；预检 hash，批准后复核，临时文件 + fsync + os.replace，冲突不覆盖也不重试。小文件提交不含异步让出，完成的修改不会因后续取消自动回滚。
+- bash 工具在 Windows 使用实际 PowerShell，完整编码前置脚本进入审批；cwd 解析在工作区内，环境白名单不继承模型 API 配置。独立标准库 supervisor 在执行命令前完成进程归属与 ready/确认握手；Windows Job 的 KILL_ON_JOB_CLOSE 管理普通子孙进程，POSIX 用独立进程组。
+- 故障定位发现 Windows venv redirector 不能当作实际 supervisor 句柄，改用基础解释器启动 worker；同时避免等待后台后代持有的管道 EOF 才触发清理。正常结束、超时、取消、Core 关闭均有真实多级进程树退出测试。
+- 无法确认清理时 ToolResult 内部 stop_run 标志终止整个 run，不再执行同批后续工具或下一模型请求；该内部字段不进入模型消息。配对错误保留实际 tool_use_id。没有自动重试有副作用动作。
+- 最终行为命令：`uv run --locked --offline pytest -q -p no:cacheprovider --basetemp <工作区内已核验目录>`，164 passed in 21.01s，无跳过。先前 S0—S2 的 130 项也保持通过；覆盖参数/越界、审批归属/过期、拒绝无副作用、批准后文件冲突、错误回填、输出排空截断和进程清理。
+- 固定响应挂载 TUI 实例：真实读取 calc.py/check.py，检查先失败，批准修复后成功，5 步；写入/命令授权早于执行，成功检查输出进入下一模型请求。动作和最后文字预先给定，只证明程序链路。
+- 初步真实 deepseek-flash 受限示例也通过，但当时提示给出具体替换规则，仅证明真实模型的受控修改链路。已加强最终脚本：不提供修复答案，必须读取两个源码、定位问题；独立安装后的真实结果在收尾记录，不把初步案例冒充完整定位证明。
+- Windows 0.4.0 真实 CTRL_C_EVENT：端口 57748，两次退出码均 0，耗时 0.344/0.360 秒，同端口重启和活动连接收尾通过；这不是人工键盘演示。活动命令的关闭清理由进程树集成测试另行验证。
+- 已讲解关键边界：完整调用 → 注册表预检 → 连接拥有的审批 → 获准后执行 → 同编号结果回填；清理失败停止运行。独立安装、最终真实验证、文档与阶段标签在验收节点完成。

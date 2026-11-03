@@ -158,7 +158,8 @@ class SocketServer:
         tasks = tuple(self._tasks)
         writers = tuple(self._writers)
         for task in tasks:
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         try:
             async with asyncio.timeout(self._shutdown_timeout):
                 # 即使任务在首次运行前被取消，也要等待它对应的连接真正关闭。

@@ -16,10 +16,14 @@ from codepilot import get_version
 from codepilot.agent.provider import AnthropicProvider
 from codepilot.core.config import ModelSettings, Settings
 from codepilot.core.runner import Runner
-from codepilot.protocol.messages import INVALID_PARAMS, METHOD_NOT_FOUND, AgentRunParams, CancelParams, PingResult, Request, RpcFault
+from codepilot.core.approvals import ApprovalBroker
+from codepilot.core.permissions import PermissionPolicy
+from codepilot.core.context import ExecutionContext
+from codepilot.agent.types import ToolUse
+from codepilot.protocol.messages import INVALID_PARAMS, METHOD_NOT_FOUND, AgentRunParams, ApprovalResponseParams, CancelParams, PingResult, Request, RpcFault
 from codepilot.agent.types import RunResult
 from codepilot.core.events import RunEvent
-from codepilot.tools.readonly import readonly_registry
+from codepilot.tools.builtin import builtin_registry
 from codepilot.transport.server import SocketServer
 from codepilot.transport.peer import PeerConnection, current_peer
 
@@ -46,8 +50,15 @@ class CoreService:
     def __init__(self, runner: Runner | None = None) -> None:
         self._runner = runner
         self._jobs: dict[str, OwnedRun] = {}
+        self.approvals = ApprovalBroker()
 
     async def handle(self, request: Request) -> dict[str, Any]:
+        if request.method == "approval.respond":
+            try:
+                params = ApprovalResponseParams.model_validate(request.params)
+            except ValueError as exc:
+                raise RpcFault(INVALID_PARAMS, "approval.respond requires approval_id and a boolean allow") from exc
+            return {"accepted": self.approvals.respond(current_peer(), params.approval_id, params.allow)}
         if request.method == "agent.cancel":
             try:
                 params = CancelParams.model_validate(request.params)
@@ -58,8 +69,9 @@ class CoreService:
                 return {"cancelled": False}
             if job.owner is not current_peer():
                 raise RpcFault(-32011, "Run belongs to another connection")
+            already_requested = job.cancel_requested
             job.cancel_requested = True
-            if job.started and job.task is not None:
+            if not already_requested and job.started and job.task is not None:
                 job.task.cancel()
             return {"cancelled": True}
         if request.method not in {"agent.run", "agent.start"}:
@@ -87,10 +99,12 @@ class CoreService:
 
     async def _run_owned(self, run_id: str, job: OwnedRun, params: AgentRunParams) -> None:
         job.started = True
+        async def approve(call: ToolUse, preview: dict[str, Any], context: ExecutionContext) -> bool:
+            return await self.approvals.request(job.owner, call, preview, context)
         try:
             await self._runner.run(
                 params.goal, max_steps=params.max_steps, run_id=run_id, stream=True,
-                on_event=job.owner.event, cancel_before_start=job.cancel_requested,
+                on_event=job.owner.event, cancel_before_start=job.cancel_requested, approver=approve,
             )
         except asyncio.CancelledError:
             raise
@@ -103,6 +117,7 @@ class CoreService:
 async def run_core(
     settings: Settings, *, workspace: Path | None = None, model: ModelSettings | None = None,
     record_dir: Path | None = None,
+    policy: PermissionPolicy | None = None,
 ) -> None:
     async with AsyncExitStack() as resources:
         runner = None
@@ -113,7 +128,7 @@ async def run_core(
                 model=model.model, max_tokens=model.max_tokens,
             )
             runner = Runner(
-                provider, readonly_registry(), workspace or Path.cwd(),
+                provider, builtin_registry(), workspace or Path.cwd(), policy=policy,
                 record_dir=record_dir or (workspace or Path.cwd()) / "artifacts" / "runs",
                 secrets=(model.api_key.get_secret_value(),),
             )

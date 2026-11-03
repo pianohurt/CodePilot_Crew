@@ -27,7 +27,8 @@ class PeerConnection:
         self.closed = True
         self.writer.close()
         for task in tuple(self.background):
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
 
     def _enqueue(self, message: dict[str, Any]) -> None:
         if self.closed:
@@ -61,7 +62,8 @@ class PeerConnection:
         self.disconnect()
         tasks = (*self.requests.values(), *self.background, pump)
         for task in tasks:
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
 

@@ -19,6 +19,7 @@ class RunView:
     error: str = ""
     result: RunResult | None = None
     delta_count: int = 0
+    approvals: dict[str, dict] = field(default_factory=dict)
 
     def apply(self, event: RunEvent) -> None:
         if event.run_id != self.run_id or event.seq <= self.seq or self.result is not None:
@@ -36,7 +37,12 @@ class RunView:
             self.tools[event.tool_use_id] = f"{event.data.get('name')} {event.data.get('input')}\n执行中"
         elif event.type == "tool.completed":
             self.tools[event.tool_use_id] = f"{event.data.get('name')} [{event.tool_use_id}]\n{'错误' if event.data.get('is_error') else '完成'}: {event.data.get('content')}"
+        elif event.type == "approval.requested":
+            self.approvals[event.data["approval_id"]] = event.data
+        elif event.type == "approval.resolved":
+            self.approvals.pop(event.data["approval_id"], None)
         elif event.type == "run.finished":
+            self.approvals.clear()
             self.result = RunResult.model_validate(event.data["result"])
             self.status = self.result.status
             self.answer = self.result.answer if self.status == "success" else ""
