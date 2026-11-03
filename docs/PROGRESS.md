@@ -7,7 +7,7 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S2 本机 Windows 验收完成；S3 实现与 164 项离线测试通过，独立安装验收进行中。用户已推送 S1，本轮未 push；S4—S9 未开始，Linux 和远端 CI 本轮未验证。
+- S0—S3 本机 Windows 验收完成；164 项离线测试通过，独立安装后的固定响应与真实 deepseek-flash 修复案例分别通过。用户已推送 S1，本轮 S2/S3 均未 push；S4—S9 未开始，Linux 和远端 CI 本轮未验证。
 - 当前版本 0.4.0，已有 Agent、真实 SSE、连接事件、启动/取消、JSONL、Textual，以及受控写入/命令、三态权限和逐次审批。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
@@ -150,3 +150,15 @@
 - 初步真实 deepseek-flash 受限示例也通过，但当时提示给出具体替换规则，仅证明真实模型的受控修改链路。已加强最终脚本：不提供修复答案，必须读取两个源码、定位问题；独立安装后的真实结果在收尾记录，不把初步案例冒充完整定位证明。
 - Windows 0.4.0 真实 CTRL_C_EVENT：端口 57748，两次退出码均 0，耗时 0.344/0.360 秒，同端口重启和活动连接收尾通过；这不是人工键盘演示。活动命令的关闭清理由进程树集成测试另行验证。
 - 已讲解关键边界：完整调用 → 注册表预检 → 连接拥有的审批 → 获准后执行 → 同编号结果回填；清理失败停止运行。独立安装、最终真实验证、文档与阶段标签在验收节点完成。
+
+## S3 验收与交接
+
+- 实现节点 8deb7aa；stage-3 定位本次验收交接提交，保留 stage-0 至 stage-2。本轮 S3 两个本地逻辑提交，未 push；相对本地 origin/main=291665d，S2/S3 合计四个新提交，不代表已实时查询远端。
+- 独立构建 codepilot-0.4.0-py3-none-any.whl，使用锁文件运行时约束安装到新环境 .cache/s3-install-check，共 21 个包。切换到该目录确认版本 0.4.0，包与 command_worker.py 均从其 site-packages 加载。
+- 安装后的固定响应：5 步、37 条事件/10 条 Trace，真实读取、批准写入和命令执行；预设第一次命令失败并回填 is_error，修复后独立检查成功。最终文本预先给定，只证明程序链路。
+- 安装后的真实 deepseek-flash：4 步、256 条事件/8 条 Trace、230 条文本增量。提示未给修复答案；模型读取 calc.py/check.py，定位加法写成减法，仅提出一次写入和一次检查。两次获准后执行；独立检查 baseline exit=1 → final exit=0，成功命令的 exit_code=0 与随机 CHECK_OK 标记进入后续模型请求，最终回答标记一致。
+- 验证脚本在临时目录运行，实际挂载 TUI 并通过按钮自动批准严格限定的示例函数修复和 python check.py，其他动作拒绝。这不是人工审批演示，也不允许模型自动改本项目文件。证据 artifacts/s3-fixed-installed.json 与 artifacts/s3-real-installed.json，截图及 JSONL 同样被忽略。
+- 新增本地 S3_DESIGN、S3_VALIDATION、S3_WALKTHROUGH，README 与已跟踪状态文档同步。已用真实示例解释审批 Future 的连接归属、完整预览、批准后 hash 复核、同编号错误回填、Job/supervisor 和清理失败停止。S3 到此完成，等待用户指定 S4。
+- 收尾检查：17 份 Markdown、29 个本地链接、围栏和 4 个 JSON 示例有效；wheel 中 35 个 Python 模块与当前源码逐字节一致，不含配置/缓存/字节码；4 份 SVG 可解析，4 个 S3 演示共 664 条事件通过类型、seq、run_id 与最终状态检查。已跟踪内容和上述证据未检出配置密钥，.env、证据和新增阶段文档均被忽略；`git diff --check` 通过。
+- 只保证正常超时/取消/关闭路径的普通命令进程树清理，不提供恶意脚本隔离、外部服务回收或强制杀死 Core 后的恢复；应用层写入检查也不保证抵抗恶意并发路径替换。Linux、远端 CI、人工键盘演示未验证。
+- 旧 CodePilot 只读复核：工作树仍干净，HEAD=75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35，未被修改。

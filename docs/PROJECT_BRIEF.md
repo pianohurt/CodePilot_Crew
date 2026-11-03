@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-状态：S0—S2 已完成本机 Windows 验收，版本 0.4.0 的 S3 实现与 164 项离线检查通过，独立安装验收进行中；新增受控写入、命令、三态权限与 TUI 审批，S4—S9 未开始。具体结果与限制见 PROGRESS；新增阶段分析文档遵循用户 docs/ 忽略规则留本地。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
+状态：S0—S3 已完成本机 Windows 验收，版本 0.4.0，164 项离线检查通过；独立安装后的固定响应和真实 deepseek-flash 均完成示例定位/修改/检查闭环。已有受控写入、命令、三态权限与 TUI 审批，S4—S9 未开始。具体结果与限制见 PROGRESS；新增阶段分析文档遵循用户 docs/ 忽略规则留本地。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
 
 ## 用户与目的
 
