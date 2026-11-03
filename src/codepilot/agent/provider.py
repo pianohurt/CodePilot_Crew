@@ -9,7 +9,7 @@ import httpx
 from pydantic import ValidationError
 
 from codepilot.agent.types import Message, ModelResponse, ToolDefinition
-from codepilot.agent.sse import collect_message
+from codepilot.agent.sse import StreamInterrupted, collect_message
 
 SYSTEM_PROMPT = (
     "You are a local coding assistant. Use only the tools supplied in this request. Inspect files before modifying them. "
@@ -42,9 +42,10 @@ def request_cost(payload: dict[str, Any]) -> int:
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, invalid_response: bool = False) -> None:
+    def __init__(self, message: str, *, invalid_response: bool = False, retryable: bool = False) -> None:
         super().__init__(message)
         self.invalid_response = invalid_response
+        self.retryable = retryable
 
 
 class Provider(Protocol):
@@ -146,6 +147,12 @@ class AnthropicProvider:
                     raise ProviderError(f"Model endpoint returned HTTP {response.status_code}")
                 raw = await collect_message(response.aiter_lines(), on_text)
             return parse_response(raw)
+        except StreamInterrupted as exc:
+            raise ProviderError("Model stream ended before message_stop", invalid_response=True, retryable=True) from exc
+        except (httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            raise ProviderError("Model stream timed out", retryable=True) from exc
+        except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as exc:
+            raise ProviderError("Model stream connection interrupted", retryable=True) from exc
         except httpx.TimeoutException as exc:
             raise ProviderError("Model stream timed out") from exc
         except httpx.HTTPError as exc:

@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-2026-11-03：当前版本 0.5.0，S0—S4 已完成本机 Windows 验收，195 项离线检查通过。最终独立安装的固定响应与真实 deepseek-flash 分别完成跨进程恢复：删除原文件后仍能依据保存的观察继续回答，恢复轮零工具调用。保留 F10/退出按钮调整。用户已推送 S1，本轮未 push 或查询远端 CI；Linux 尚未实测。
+当前版本为 0.6.0，S0—S5 已完成本机 Windows 验收，206 项离线检查通过。S5 增加上下文预算、结构化摘要和流式异常恢复。真实模型压缩与流式故障注入的结果分别记录在项目进度中。
 
-本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。目前已接入循环、读取、受控写入与命令执行，其他能力随阶段推进。
+本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩与流式重试。
 
 ## 本机安装与演示（Windows PowerShell）
 
@@ -22,7 +22,7 @@ uv --cache-dir .cache/uv sync --locked
 uv --cache-dir .cache/uv run --locked codepilot version
 ```
 
-预期输出 `codepilot 0.5.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存；缓存和虚拟环境不提交。
+预期输出 `codepilot 0.6.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
 
 第一个终端启动 Core：
 
@@ -103,7 +103,7 @@ CLI 也可使用 `session-new --title 名称` 创建、`resume <会话编号>` �
 
 默认私有数据位于工作区 `.codepilot/sessions.sqlite3`，Git 和普通文件工具均排除 `.codepilot/`。服务端可用 --session-dir 指定其他目录；若在工作区内，必须位于 `.codepilot/` 下。同一数据目录只由一个 Core 打开。数据库以 session 保存快照/笔记，以 run_id+seq 保存独立原始增量、任务引用、状态与用量；消息采用和对应增量在同一事务中提交，不依赖可压缩 messages 的旧偏移。
 
-原始记录保存领域层请求、完整模型响应和工具意图/结果，不是 HTTP/SSE 字节日志。为兼容模型续谈，私有库保留 opaque thinking/signature，不在 UI/Trace 展示；库可能含源码和对话，未加密，配置密钥会替换为 REDACTED。单条原始记录最多 2 MiB，工作快照最多 8 MiB，超限明确失败；S4 尚未压缩历史。用量按 API 实际返回汇总，未返回时为空。
+原始记录保存领域层请求、完整模型响应和工具意图与结果。私有库为模型续谈保留 opaque thinking/signature，UI 与 Trace 省略正文。库可能含源码和对话，采用本地明文存储，配置密钥会替换为 REDACTED。单条记录最多 2 MiB，持久化会话快照最多 8 MiB。用量按 API 实际返回汇总，包含摘要调用。
 
 工作区可选 `CODEPILOT.md` 作为项目背景（UTF-8，最多 16 KiB），每次会话运行读取；错误/越界背景会明确阻止模型请求。模型可显式调用 note_save 保存当前会话笔记：默认 ask，审批展示 key 和完整内容；同 key 替换，最多 20 条、每条 4000 字符。笔记只在此会话后续请求中使用，背景和笔记均不扩大工具权限。
 
@@ -138,7 +138,15 @@ bash 是工具协议名：Windows 实际使用 PowerShell，POSIX 使用 bash，
 
 TCP 使用 UTF-8 NDJSON，单帧最多 64 KiB。持久连接通过 id→Future 关联并发响应，kind=event 单独分流。支持 core.ping、agent.run/start/cancel、approval.respond、session.create/list/resume；不支持 JSON-RPC 批量或通知。超大响应 -32002，未配置模型 -32010，操作其他连接的运行/审批 -32011，审批过期 -32013；会话未配置 -32020、不存在 -32021、忙碌 -32022、损坏/持久化失败 -32023。session.list 最多返回最近 50 条，不包含原始消息或 opaque 正文。请求超时关闭连接并清理全部等待者，整体运行另有 90 秒预算。
 
-每连接最多 32 个未完成请求、写队列最多 512 帧，服务最多 8 个事件运行；队列超限明确断连并取消，不悄悄丢最终事件。只读 I/O 的取消是停止等待，不能声称强制中断了所有底层文件系统操作。没有在 S2 加入流式重试。
+每连接最多 32 个未完成请求、写队列最多 512 帧，服务最多 8 个事件运行；队列超限明确断连并取消，不悄悄丢最终事件。只读 I/O 的取消是停止等待，不能声称强制中断了所有底层文件系统操作。
+
+## 长任务与流式恢复
+
+`CODEPILOT_CREW_CONTEXT_BUDGET` 默认 65,536，可设为 8,192 至 262,144。程序按实际 JSON 负载的 UTF-8 字节数计算本地估算，加上输出上限与 1,024 余量。预算包含系统提示、工具定义和当前消息。具体端点仍按自己的 tokenizer 与窗口处理请求。
+
+例如，一次读取返回很长的工具回执。下一步先检查完整请求。超限时把过长回执缩至 2,048 字节并标记截断。若仍超限，程序分批摘要早期历史，保留当前输入和最近两组消息，每组工具调用及结果一起保留。摘要记录目标、约束、文件状态、已完成事项、待办与验证结果。每个主请求前至多调用八次摘要。摘要无效、无法缩小或仍无法装入时，本轮返回 `context_budget`。工具回执的截断减少一次请求的体积，摘要归纳早期对话，笔记由用户授权持久保存。会话恢复读取完整历史并按需重算摘要。
+
+流式连接或读取失败时，单个模型步骤最多尝试三次，退避为 100 和 200 毫秒，并受 run 总时限约束。流结束却缺少结束标记也可重试。HTTP 错误状态和已识别的响应格式错误直接结束该步骤。每次尝试重新读取完整响应，界面按 run、step、attempt 清除上次草稿。解析完成的响应进入 AgentLoop 的工具校验，已执行的写入保留在其原步骤。
 
 ## 验证与学习
 
@@ -185,6 +193,14 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s4.py --provider rea
 
 启动独立 Core 子进程读取临时文件的随机标记；退出并删除文件，再启动新的 Core，列出、恢复并追问；核对新请求保留前次真实工具观察、恢复轮没有调用工具、最终回答标记一致。固定模式另有直接结束 Core 的崩溃案例，检查 interrupted 与已完成写入未重放。最终文本预设和真实模型结果分开；导出证据省略 opaque 正文，不能替代私有完整会话库。
 
+S5 可用下面两组命令复验预算边界与断流恢复。最后一条用已配置的模型处理临时合成会话。
+
+```powershell
+uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test_s5_context.py
+uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test_s5_stream_retry.py
+uv --cache-dir .cache/uv run --locked python scripts/verify_s5_context.py --env-file .env
+```
+
 ## 从哪里开始
 
 | 文件 | 用途 |
@@ -197,10 +213,10 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s4.py --provider rea
 | [S0_VALIDATION.md](docs/S0_VALIDATION.md) | 实际命令、结果、故障与未验证项 |
 | [S0_WALKTHROUGH.md](docs/S0_WALKTHROUGH.md) | 以 ping 解释关键函数、状态、错误路径与取舍 |
 
-每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。本轮只做用户指定的 S4，S5 由用户另行指定。阶段分析文档按当前 docs/ 忽略规则留本地；已被 Git 跟踪的交接文件仍随提交更新。
+每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S5。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
 
 ## 参考与开发方式
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收；stage-0 至 stage-4 用于定位已验收阶段。不沿用旧项目测试成绩，不预设效果提升数字。用户已推送 S1，后续本地提交没有自动 push。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-5 用于定位已验收阶段。

@@ -7,6 +7,7 @@ from time import perf_counter
 
 from codepilot.agent.provider import Provider, ProviderError
 from codepilot.agent.compact import ContextBudgetError, fit_context
+from codepilot.agent.streaming import stream_with_retries
 from codepilot.agent.types import Message, RunResult, TextBlock, ToolReceipt, ToolUse
 from codepilot.core.context import ExecutionContext
 from codepilot.tools.registry import ToolRegistry
@@ -59,10 +60,7 @@ class AgentLoop:
             try:
                 streaming = getattr(self._provider, "stream_complete", None) if context.streaming else None
                 if streaming:
-                    def on_text(text: str) -> None:
-                        if context.events:
-                            context.events.emit("model.delta", step=step, text=text)
-                    response = await streaming(messages, definitions, on_text)
+                    response = await stream_with_retries(streaming, context, messages, definitions)
                 else:
                     response = await self._provider.complete(messages, definitions)
             except asyncio.CancelledError:

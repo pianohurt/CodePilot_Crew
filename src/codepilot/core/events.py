@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from codepilot.agent.types import RunResult
 
 type EventName = Literal[
-    "run.started", "step.started", "model.started", "model.delta", "model.completed",
+    "run.started", "step.started", "model.started", "model.delta", "model.completed", "model.retry",
     "tool.started", "tool.completed", "run.finished",
     "approval.requested", "approval.resolved",
 ]
@@ -27,6 +27,11 @@ class RunEvent(BaseModel):
 
     @model_validator(mode="after")
     def check_payload(self) -> "RunEvent":
+        if self.type == "model.retry" or (self.type == "model.delta" and "attempt" in self.data):
+            attempt = self.data.get("attempt")
+            minimum = 2 if self.type == "model.retry" else 1
+            if type(attempt) is not int or attempt < minimum:
+                raise ValueError("Invalid model attempt")
         if self.type in {"model.delta", "model.completed"} and not isinstance(self.data.get("text"), str):
             raise ValueError("Model text event requires text")
         if self.type.startswith("tool."):

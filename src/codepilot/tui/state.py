@@ -14,6 +14,7 @@ class RunView:
     step: int = 0
     seq: int = 0
     drafts: dict[int, str] = field(default_factory=dict)
+    attempts: dict[int, int] = field(default_factory=dict)
     tools: dict[str, str] = field(default_factory=dict)
     answer: str = ""
     error: str = ""
@@ -28,7 +29,11 @@ class RunView:
         self.step = event.step
         if event.type == "run.started":
             self.goal = str(event.data.get("goal", ""))
-        elif event.type == "model.delta":
+        elif event.type == "model.retry":
+            if event.data["attempt"] > self.attempts.get(event.step, 1):
+                self.attempts[event.step] = event.data["attempt"]
+                self.drafts.pop(event.step, None)
+        elif event.type == "model.delta" and event.data.get("attempt", 1) == self.attempts.get(event.step, 1):
             self.delta_count += 1
             self.drafts[event.step] = self.drafts.get(event.step, "") + str(event.data.get("text", ""))
         elif event.type == "model.completed":

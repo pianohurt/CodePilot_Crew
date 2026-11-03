@@ -7,9 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S4 本机 Windows 验收完成，195 项离线测试通过；最终独立安装的固定响应与真实 deepseek-flash 跨进程恢复分别通过。用户已推送 S1，后续本地提交没有自动 push；S5—S9 未开始，Linux 和远端 CI 本轮未验证。
-- 当前版本 0.5.0，已有会话列表/恢复、独立原始记录、会话笔记和背景文件；保留 Agent、SSE、JSONL、Textual、写入/命令、三态权限和逐次审批。
-- VS Code 退出键冲突修复 c3a9318 已保留：F10 和“退出”按钮；本轮基于该干净起点实施用户指定的 S4。
+- S0—S5 本机 Windows 验收完成，206 项离线检查通过。真实模型摘要和健康流式路径已验证，断流故障由离线测试注入。Linux 与远端 CI 尚未验证。
+- 当前版本 0.6.0，已有受控工具、会话恢复、独立原始记录、上下文压缩和流式重试。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,8 +49,8 @@
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
-- S4 已有保存上下文后的会话继续交互；仍没有压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的等待及普通命令进程树，不保证强制中断所有底层只读 I/O。
-- 本轮由用户指定实施 S4，不自动开始 S5 或 push。命令以当前用户权限运行；会话恢复不重放工具或恢复命令进程，应用层审批与 cwd 检查不提供操作系统隔离。
+- S5 在模型输入层压缩历史，存储上限继续适用于完整历史。会话恢复读取上下文并重算摘要。流式重试受单步三次尝试和 run 总时限约束。
+- 命令以当前用户权限运行。取消和断连会清理连接拥有的等待及普通命令进程树。下一计划阶段为 S6 多 Agent 委派。
 
 ## 启动设计时的文档检查
 
@@ -209,3 +208,12 @@
 - SessionStore 持续写入完整采用消息和原始动作记录。摘要只影响本轮发给模型的工作副本，恢复时从完整历史重新计算。摘要响应单独记账。会话现有存储上限仍适用。
 - Windows 全量离线 199 项通过。专项覆盖真实 HTTP 请求负载检查、回执缩短、重开数据库后连续摘要、空摘要和上游错误。旧 run 原始记录逐条一致。
 - 真实验证 scripts/verify_s5_context.py 使用临时合成会话和配置的 deepseek-flash，重开数据库后做 2 次摘要，估算 23,539 → 7,344，预算 14,000。最终回答保留此前验证标识，工具调用 0，原始记录逐条一致。报告 artifacts/s5a-real.json，作为单个真实案例记录。
+
+## S5B 流式重试与验收交接
+
+- AgentLoop 只重试当前模型流。Provider 将连接异常、读取异常、对应超时、远端协议中断和缺少 message_stop 的流结束标为可重试。每步最多三次，等待 100 和 200 毫秒，统一受 run 总时限约束。HTTP 状态失败和已识别格式错误直接返回。Core 使用默认 HTTPX 传输，已安装版本的底层连接重试默认值为零。[HTTPX 传输说明](https://www.python-httpx.org/advanced/transports/) · [异常类型](https://www.python-httpx.org/exceptions/)
+- 每次尝试用新的 SSE 解析缓冲区，按 attempt 记录开始、失败与完成。model.retry 清除当前 run 对应 step 的旧草稿，新 attempt 的增量写入新草稿，model.completed 提交完整文本。工具执行位于重试循环之外。取消可中止退避。
+- 离线测试使用 HTTPX MockTransport 注入首包前 ConnectError、半途 ReadError、缺少结束标记、连续失败、非法 SSE、HTTP 503 及退避期间取消。实际挂载 Textual 并通过本地 TCP 同时运行两个 run，核对旧草稿、清除后的等待态、新答案和另一 run 的结果。真实临时 write_file 只执行一次，半截工具调用与后续模型断流均未导致额外写入。
+- Windows 全量离线 206 passed in 32.30s，无跳过。报告 artifacts/s5-pytest.txt。S5A 与 S5B 可分别运行 tests/integration/test_s5_context.py 和 tests/integration/test_s5_stream_retry.py 复验。
+- 从锁文件离线构建 codepilot-0.6.0-py3-none-any.whl，独立环境安装 21 个运行时包。源码、wheel 和安装目录的 42 个 Python 模块逐字节一致。安装后的固定响应与真实 deepseek-flash 均完成挂载 TUI 的读取和最终答案核对，分别产生 4 与 147 个增量。报告 artifacts/s5-stream-fixed-installed.json 和 artifacts/s5-stream-real-installed.json。两次安装回归使用健康流，断流恢复的证据来自离线注入。
+- S5A 本地提交 265d457，stage-5 标记 S5B 验收提交。阶段停在 S5。Linux 和远端 CI 未运行，用户配置的 API 分词、预算选择和摘要质量仍以具体任务与端点为准。

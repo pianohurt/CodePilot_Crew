@@ -136,7 +136,11 @@ class CodePilotApp(App[None]):
         self.query_one("#answer", Static).update(view.text or "等待模型…")
         self.query_one("#tools", Static).update("\n\n".join(view.tools.values()) or "暂无工具调用")
         status = {"running": "运行中", "success": "已完成", "failed": "失败", "cancelled": "已取消"}[view.status]
-        self.query_one("#status", Static).update(f"{status} · 步骤 {view.step} · {view.run_id[:8]}" + (f" · {view.result.stop_reason}" if view.result else ""))
+        attempt = view.attempts.get(view.step, 1)
+        detail = f" · {view.result.stop_reason}" if view.result else ""
+        if view.result is None and attempt > 1:
+            detail = f" · 第 {attempt} 次模型尝试"
+        self.query_one("#status", Static).update(f"{status} · 步骤 {view.step} · {view.run_id[:8]}{detail}")
         busy = view.result is None
         self.query_one("#goal", Input).disabled = busy
         self.query_one("#start", Button).disabled = busy or self._launching or not self._connected

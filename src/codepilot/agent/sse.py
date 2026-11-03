@@ -6,6 +6,10 @@ from collections.abc import AsyncIterable, Callable
 from typing import Any
 
 
+class StreamInterrupted(ValueError):
+    """连接在完整消息结束标记之前关闭。"""
+
+
 async def collect_message(lines: AsyncIterable[str], on_text: Callable[[str], None]) -> dict[str, Any]:
     blocks: dict[int, dict[str, Any]] = {}
     partial: dict[int, str] = {}
@@ -27,6 +31,8 @@ async def collect_message(lines: AsyncIterable[str], on_text: Callable[[str], No
             continue
         event = json.loads("\n".join(data))
         data.clear()
+        if not isinstance(event, dict):
+            raise ValueError("Invalid model stream event")
         kind = event.get("type")
         if kind == "ping":
             continue
@@ -88,4 +94,4 @@ async def collect_message(lines: AsyncIterable[str], on_text: Callable[[str], No
             return {"content": list(blocks.values()), "stop_reason": stop_reason, "usage": usage}
         else:
             raise ValueError("Unknown or failed model stream event")
-    raise ValueError("Model stream ended before message_stop")
+    raise StreamInterrupted("Model stream ended before message_stop")
