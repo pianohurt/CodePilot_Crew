@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-2026-11-02：当前版本 0.2.0，S0 和 S1 已实现。105 项离线测试通过；固定响应读取链路与真实 deepseek-flash 读取随机文件标记分别验证，经 CLI/TCP/Core 的真实案例用 2 次模型请求完成。Windows Ctrl+C 和同端口重启回归通过。远端由用户关联，本轮未 push 或查询远端 CI；Linux 尚未实测。
+2026-11-03：当前版本 0.3.0，S0—S2 已实现。130 项离线测试通过，包含真实挂载的 Textual 界面测试；固定流和真实 deepseek-flash SSE 分别完成随机文件标记验收，最终界面与完整回答一致。Windows Ctrl+C 和同端口重启回归通过。用户已推送 S1，本轮未 push 或查询远端 CI；Linux 尚未实测。
 
 本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。目前完成第一条中的只读循环与工具校验，其他能力随阶段推进。
 
@@ -22,7 +22,7 @@ uv --cache-dir .cache/uv sync --locked
 uv --cache-dir .cache/uv run --locked codepilot version
 ```
 
-预期输出 `codepilot 0.2.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存；缓存和虚拟环境不提交。
+预期输出 `codepilot 0.3.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存；缓存和虚拟环境不提交。
 
 第一个终端启动 Core：
 
@@ -43,7 +43,7 @@ uv --cache-dir .cache/uv run --locked codepilot ping
 
 ## 运行只读 Agent
 
-先停止之前未配置模型的 Core。在工作区内准备本地配置，已有 .env 时保留它：
+先停止旧版或未配置模型的 Core。在工作区内准备本地配置，已有 .env 时保留它：
 
 ```powershell
 if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
@@ -68,7 +68,21 @@ uv --cache-dir .cache/uv run --locked codepilot run "读取 README.md，概括�
 
 本阶段工具只有 read_file 和 list_dir。路径解析后检查工作范围，拒绝越界、范围外链接、.git/.venv/.cache/.env 和 Windows 备用数据流。读取 UTF-8 文件最多 128 KiB，目录最多 100 项，工具文本最多 8 KiB且截断有标记。这些是应用层读取边界，不代表完整文件系统隔离。
 
-使用完整响应模式，整批调用结构、停止原因和 id 校验后才执行；工具错误同样回传 is_error 结果。max_steps、max_tokens、超时或无效响应都会失败。支持将 thinking/signature 当作 opaque 数据回传兼容端点，不展示或解释其正文。没有写入、命令执行、流式界面或会话记忆。
+命令行 run 保留完整回答模式，TUI 使用真实 SSE 增量。两条路径都在完整响应与整批调用校验后才执行工具；工具错误同样回传 is_error。max_steps、max_tokens、超时或无效响应都会失败。thinking/signature 只作 opaque 数据回传，不展示或解释正文。没有写入、命令执行或会话记忆。
+
+## 终端工作台
+
+第一个终端继续运行带 --env-file 的 Core，在第二个终端进入本目录执行：
+
+```powershell
+uv --cache-dir .cache/uv run --locked codepilot tui
+```
+
+输入目标并按 Enter 或点击“开始”。界面显示当前步骤、回答草稿、工具参数与结果；流式文字持续更新同一块回答。完整步骤文本替换草稿，最终结果再次使用 Core 的完整回答；失败或取消时明确标注草稿未采纳。
+
+Ctrl+C 或“取消”发送取消请求，收到 run.finished 才显示已取消；Ctrl+Q 退出界面。断开连接会取消该连接拥有的运行，Core 自身继续监听。TUI 当前一次运行一个目标，不含会话恢复、自动重连或后台任务持久化。
+
+Core 默认将脱敏记录写入 `artifacts/runs/<run_id>/`，也可用 --record-dir 指定目录：events.jsonl 是进度事件，trace.jsonl 是模型请求、响应、API 用量、耗时、错误和取消。它们不是会话原始记录；省略 thinking 正文/签名，超长记录明确截断，不记录请求头或配置密钥。API 未返回用量时保留为空，不估造 token 数。
 
 ## 接口与配置
 
@@ -78,10 +92,13 @@ uv --cache-dir .cache/uv run --locked codepilot run "读取 README.md，概括�
 | `codepilot ping [--port N] [--timeout SECONDS]` | 一次真实 TCP 请求，校验响应编号和 pong 结构 |
 | `codepilot version` | 显示本地包版本，Core 离线可用 |
 | `codepilot run GOAL [--max-steps N] [--timeout SECONDS] [--json]` | 完整运行一次只读任务，成功退出 0，失败退出 1 |
+| `codepilot tui [--port N] [--timeout SECONDS]` | 连接已有 Core，显示真实事件和文本增量，支持取消 |
 
 环境变量为 `CODEPILOT_CREW_PORT`、`CODEPILOT_CREW_TIMEOUT`、`CODEPILOT_CREW_LOG_LEVEL`，优先级为命令参数 > 环境变量 > 默认值。请求默认等待 5 秒，连接收尾另有最多 1 秒预算。成功退出码为 0，运行/通信失败为 1，配置/参数错误为 2。
 
-TCP 上使用 UTF-8 NDJSON 与严格的 JSON-RPC 风格受限信封。每帧最多 64 KiB，支持 `core.ping` 和 `agent.run`，不支持批量、通知或事件流。超大响应返回 -32002；未配置模型返回 -32010。CLI 的文本和 JSON 使用 UTF-8。客户端超时只停止等待，Core 另有运行预算；显式取消在 S2 推进。
+TCP 使用 UTF-8 NDJSON，单帧最多 64 KiB。持久连接通过 id→Future 关联并发响应，kind=event 单独分流。支持 core.ping、agent.run、agent.start、agent.cancel；不支持 JSON-RPC 批量或通知。超大响应返回 -32002，未配置模型 -32010，取消其他连接的运行 -32011。请求超时关闭连接并清理全部等待者；Core 取消连接拥有的运行，整体运行另有 90 秒预算。
+
+每连接最多 32 个未完成请求、写队列最多 512 帧，服务最多 8 个事件运行；队列超限明确断连并取消，不悄悄丢最终事件。只读 I/O 的取消是停止等待，不能声称强制中断了所有底层文件系统操作。没有在 S2 加入流式重试。
 
 ## 验证与学习
 
@@ -101,7 +118,14 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s1.py --provider rea
 
 固定响应会实际读文件，但最终文本由脚本预先给定，只证明程序链路。真实验证让模型读取提示中未提供的随机标记，并核对工具成功、观察进入下一请求及最终答案。后者实际调用配置的模型端点。结果写入被忽略的 artifacts/；thinking 正文和签名从演示轨迹中省略，不能当作完整可重放原始 API 记录。
 
-本轮首次真实验证因兼容端点的 thinking 块而失败，未执行工具；补透传和回归后，Runner 层及 CLI/RPC 层分别通过。保留失败与成功证据，不据少量样例声称任务成功率。CI 已配置 Windows/Linux + Python 3.12，本轮只验证本机 Windows，不声称远端或 Linux 已通过。
+S1 首次真实验证因 thinking 块兼容而失败，修正后通过；保留失败与成功证据。S2 的挂载界面验证分别运行：
+
+```powershell
+uv --cache-dir .cache/uv run --locked --offline python scripts/verify_s2.py --provider fixed
+uv --cache-dir .cache/uv run --locked python scripts/verify_s2.py --provider real --env-file .env
+```
+
+两条命令都会实际挂载 Textual，读取临时随机标记文件并核对最终 widget 文本，同时生成脱敏 JSONL、结果摘要和 SVG 截图。固定流的最终回答预先给定；真实模式实际调用配置的模型服务。测试另外覆盖取消、断连、乱序响应、流截断不执行工具及不同 run/step 隔离。不据少量样例声称成功率、提速或节费。Linux 与远端 CI 本轮未验证。
 
 ## 从哪里开始
 
@@ -115,10 +139,10 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s1.py --provider rea
 | [S0_VALIDATION.md](docs/S0_VALIDATION.md) | 实际命令、结果、故障与未验证项 |
 | [S0_WALKTHROUGH.md](docs/S0_WALKTHROUGH.md) | 以 ping 解释关键函数、状态、错误路径与取舍 |
 
-每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。S1 停在只读 Agent 能力，S2 由用户另行指定。阶段分析文档按当前 docs/ 忽略规则留本地；已被 Git 跟踪的交接文件仍随提交更新。
+每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。S2 停在只读流式工作台，S3 由用户另行指定。阶段分析文档按当前 docs/ 忽略规则留本地；已被 Git 跟踪的交接文件仍随提交更新。
 
 ## 参考与开发方式
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收；stage-0、stage-1 分别定位两个阶段。不沿用旧项目测试成绩，不预设效果提升数字。远端已由用户关联，本轮新增提交未 push。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收；stage-0、stage-1、stage-2 分别定位对应阶段。不沿用旧项目测试成绩，不预设效果提升数字。用户已推送 S1，本轮 S2 新增提交未 push。

@@ -54,6 +54,7 @@ async def test_mounted_tui_stream_tools_and_terminal_state(tmp_path: Path, mode:
             await eventually(lambda: "草稿" in str(app.query_one("#answer", Static).content))
             assert "actual tool evidence" in str(app.query_one("#tools", Static).content)
             assert len(app.query("#answer")) == 1
+            assert app.query_one("#goal", Input).disabled
             if mode == "complete":
                 provider.release.set()
                 await eventually(lambda: app.views[app.active_run].result is not None)

@@ -90,6 +90,7 @@ class CodePilotApp(App[None]):
         status = {"running": "运行中", "success": "已完成", "failed": "失败", "cancelled": "已取消"}[view.status]
         self.query_one("#status", Static).update(f"{status} · 步骤 {view.step} · {view.run_id[:8]}" + (f" · {view.result.stop_reason}" if view.result else ""))
         busy = view.result is None
+        self.query_one("#goal", Input).disabled = busy
         self.query_one("#start", Button).disabled = busy or self._launching or not self._connected
         self.query_one("#cancel", Button).disabled = not busy
 

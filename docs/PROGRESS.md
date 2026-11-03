@@ -7,7 +7,7 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0、S1 验收完成，用户已推送 S1；S2 功能及行为验证已完成，独立安装与交接收尾中；S3—S9 未开始，Linux 和远端 CI 本轮未验证。
+- S0—S2 实现、验证与讲解完成，本机 Windows 验收通过；用户已推送 S1，本轮 S2 未 push；S3—S9 未开始，Linux 和远端 CI 本轮未验证。
 - 当前版本 0.3.0，已有只读 Agent、真实 SSE、单连接响应/事件多路复用、启动/取消、JSONL 记录与基础 Textual TUI。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
@@ -49,8 +49,8 @@
 - 实际结果与故障记录见 [S0_VALIDATION.md](S0_VALIDATION.md)，调用链讲解见 [S0_WALKTHROUGH.md](S0_WALKTHROUGH.md)。
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
-- S1 只实现只读 Agent，没有写入/命令、事件流、TUI、持久化、压缩、多 Agent、MCP 或 Skills。客户端超时不等于 Core 已取消；Core 另有 90 秒运行预算。
-- 已授权 S2。结束后等待用户指定 S3，不自动开始后续阶段或 push。
+- S2 已有事件流和 TUI；仍没有写入/命令、会话恢复、压缩、自动重试、多 Agent、MCP 或 Skills。取消和断连会清理连接拥有的协程等待，不保证强制中断所有底层只读 I/O。
+- S2 已完成，等待用户指定 S3，不自动开始后续阶段或 push。
 
 ## 启动设计时的文档检查
 
@@ -125,3 +125,13 @@
 - 固定流真实挂载演示通过：4 条文本增量、真实文件读取、下一请求观察与最终显示一致。真实 deepseek-flash 挂载演示通过：96 条增量事件、真实随机标记读取与最终显示一致；两类结果不混用。
 - Windows 0.3.0 真实 CTRL_C_EVENT 回归：端口 64294 两次退出均 0、耗时均 0.359 秒，同端口重启与活动连接清理通过；不是人工键盘演示。
 - 已讲解增量/步骤完成/最终回答、取消确认与连接归属。独立安装、最终说明和提交交接在收尾节点记录；不自动 push。
+
+## S2 验收与交接
+
+- 实现节点 5167bc9；stage-2 定位验收交接提交。本轮相对已推送的 291665d 新增两个本地提交，未 push，保留 stage-0/stage-1。
+- 独立 wheel 为 0.3.0，安装到新环境 .cache/s2-install-check（21 个包），从其 site-packages 加载；固定流与真实模型均实际挂载 TUI。
+- 安装后的固定流：2 步，4 条文本增量，14 条事件/4 条 Trace；真实 deepseek-flash：2 步，84 条增量，94 条事件/4 条 Trace。随机文件读取、下一请求观察及最终 widget 与完整回答一致。
+- 最后一个完整测试命令使用关闭缓存插件和工作区内 basetemp：130 passed in 13.60s，无跳过。额外跨权限测试曾因缓存/临时目录权限失败，未计入通过；已隔离测试与安装流程。
+- 新增本地 S2_DESIGN、S2_VALIDATION、S2_WALKTHROUGH，README 更新 TUI 启动/取消/记录与验证命令。证据与 SVG 截图保存在 artifacts/，密钥、运行记录和新增分析文档不进入提交。
+- 已围绕一次读取讲解请求 id/Future、run_id/step、增量与最终替换、取消确认及日志/事件/Trace 的区别。阶段到此，等待用户指定 S3。
+- 收尾检查：14 份 Markdown、29 个本地链接、围栏与 JSON 示例有效；0.3.0 wheel 全部 Python 模块与当前源码一致，不含配置/缓存/字节码；4 份 SVG 可解析，4 个演示的 228 条事件通过类型、seq 和最终状态检查；已跟踪内容及证据未检出配置密钥。新阶段分析、.env、运行记录均被忽略，`git diff --check` 通过。旧 CodePilot 工作树干净、HEAD 仍为 75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35。
