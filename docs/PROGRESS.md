@@ -7,7 +7,7 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S3 本机 Windows 验收完成；S4 实现与行为验证通过，最终安装/真实验收进行中。用户已推送 S1，后续本地提交没有自动 push；S5—S9 未开始，Linux 和远端 CI 本轮未验证。
+- S0—S4 本机 Windows 验收完成，195 项离线测试通过；最终独立安装的固定响应与真实 deepseek-flash 跨进程恢复分别通过。用户已推送 S1，后续本地提交没有自动 push；S5—S9 未开始，Linux 和远端 CI 本轮未验证。
 - 当前版本 0.5.0，已有会话列表/恢复、独立原始记录、会话笔记和背景文件；保留 Agent、SSE、JSONL、Textual、写入/命令、三态权限和逐次审批。
 - VS Code 退出键冲突修复 c3a9318 已保留：F10 和“退出”按钮；本轮基于该干净起点实施用户指定的 S4。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
@@ -188,3 +188,15 @@
 - 初步独立安装的真实 deepseek-flash：第一轮 2 步读取随机标记，第二个 Core 进程恢复后 1 步回答；原文件已删除，新请求含前次观察，恢复轮工具数 0。随后只修复初始坏会话提示；最终安装回归在收尾节点记录。
 - Windows 0.5.0 真实 CTRL_C_EVENT：端口 60919，两次退出均 0，耗时 0.360/0.406 秒，活动连接结束、存储锁释放后同端口重启成功。非人工键盘演示，也不作为崩溃后命令资源回收的证据。
 - 已讲解 session 跨 run、工作快照与原始增量分工、审批笔记进入下轮请求以及中断不重放。安装、最终证据检查、讲解文档和 stage-4 在验收节点收尾。
+
+## S4 验收与交接
+
+- 实现节点 5b6b167；stage-4 定位本次验收交接提交，保留先前阶段标签。本轮 S4 两个本地提交，无 push；相对本地 origin/main=291665d，S2/S3、退出修复和 S4 合计七个新提交，不表示查询了实时远端状态。
+- 最终 codepilot-0.5.0-py3-none-any.whl 安装于新环境 .cache/s4-install-check，21 个运行时包，导入从其 site-packages 加载。初始坏会话提示修复后重新构建/安装，最终 fixed 与 real 分别重跑通过；最终 README 同步后只刷新分发元信息，Python 模块不变。
+- 固定响应：首轮 2 步、恢复轮 1 步；两个实际 Core 进程，文件删除后列表/恢复/最终显示通过，原始记录 11+6 条、类型化事件共 21 条；最终文本预设，只证明链路。开发环境与最终安装环境的直接 os._exit(23) 崩溃注入都验证 interrupted 与原写入内容/mtime 不变，没有重放。
+- 最终真实 deepseek-flash：首轮 2 步、恢复轮 1 步，两个 Core PID 不同；原文件移除，恢复请求含上轮成功 tool_result，UI 显示上次回答，最后答案包含相同随机 MEMORY 标记；恢复轮工具数 0。原始增量 11+6 条、事件共 178 条。API 用量原样汇总 input_tokens=563、cache_creation_input_tokens=0、cache_read_input_tokens=3072、output_tokens=259；不据此声称成功率、节费或性能收益。
+- 证据 artifacts/s4-fixed-installed.json、s4-real-installed.json，以及导出 .records.json、首轮/恢复 SVG 和服务端 JSONL。私有完整领域记录在临时库内完成恢复/配对检查；公开演示导出省略 opaque 正文，不能当作完整可重放 API 数据。实际模型仅用于临时文件读取/追问，不批准项目修改或命令。
+- 新增本地 S4_DESIGN、S4_VALIDATION、S4_WALKTHROUGH，README 与已跟踪交接文件同步。已以真实重启案例解释 begin 占用、adopt 事务、原始增量独立追加、notes 下轮注入、恢复不重放和损坏隔离。阶段停在 S4，等待用户指定 S5A 或其他下一任务。
+- 收尾检查：20 份 Markdown、29 个本地链接、围栏与 4 个 JSON 示例有效；wheel/源码/独立安装的 40 个 Python 模块逐字节一致，包内没有会话库、配置、缓存或字节码；6 份 SVG 可解析，三个 S4 演示共 51 条原始增量、220 条事件通过 seq、类型、run_id、配对及最终状态核对。已跟踪内容、阶段文档、全部 S4 服务证据和默认私有库未检出配置密钥；.env、.codepilot、证据及新增阶段文档被忽略；`git diff --check` 通过。
+- 保留边界：本地私有库未加密；只恢复上下文，不恢复进程或审批；写入/命令不回滚、不重放。同步事务和历史上限有明确限制，尚无压缩、自动重试、多 Agent、MCP、Skills。Linux、远端 CI、当前 VS Code 的人工操作未验收。
+- 旧 CodePilot 只读复核：HEAD 仍为 75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35，但工作树当前出现大量未提交修改/删除/新增，与 S3 收尾的干净状态不同。本轮仅执行 Git 只读查询，未对旧目录写入、恢复或整理，也不推断这些改动的来源。

@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-状态：S0—S3 已验收，版本 0.5.0 的 S4 会话/原始记录/笔记已实现；195 项离线检查通过，跨进程固定响应与真实模型恢复分别通过，最终安装回归进行中。S5—S9 未开始。具体结果与限制见 PROGRESS；新增阶段分析文档遵循用户 docs/ 忽略规则留本地。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
+状态：S0—S4 本机 Windows 验收完成，版本 0.5.0，195 项离线检查通过；最终独立安装的固定响应与真实模型均在重启 Core、删除原文件后恢复追问，恢复轮零工具调用。S5—S9 未开始。具体结果与限制见 PROGRESS；新增阶段分析文档遵循用户 docs/ 忽略规则留本地。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew；Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
 
 ## 用户与目的
 

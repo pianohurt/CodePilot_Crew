@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-2026-11-03：当前版本 0.5.0，S0—S3 已验收，S4 会话、持久记录与会话笔记已实现，195 项离线检查通过，最终安装回归进行中。跨进程固定响应与真实模型恢复案例分别通过，实际结果见 PROGRESS。保留 F10/退出按钮调整。用户已推送 S1，本轮未 push 或查询远端 CI；Linux 尚未实测。
+2026-11-03：当前版本 0.5.0，S0—S4 已完成本机 Windows 验收，195 项离线检查通过。最终独立安装的固定响应与真实 deepseek-flash 分别完成跨进程恢复：删除原文件后仍能依据保存的观察继续回答，恢复轮零工具调用。保留 F10/退出按钮调整。用户已推送 S1，本轮未 push 或查询远端 CI；Linux 尚未实测。
 
 本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。目前已接入循环、读取、受控写入与命令执行，其他能力随阶段推进。
 
@@ -203,4 +203,4 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s4.py --provider rea
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收；stage-0 至 stage-3 用于定位已验收阶段。不沿用旧项目测试成绩，不预设效果提升数字。用户已推送 S1，后续本地提交没有自动 push。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收；stage-0 至 stage-4 用于定位已验收阶段。不沿用旧项目测试成绩，不预设效果提升数字。用户已推送 S1，后续本地提交没有自动 push。
