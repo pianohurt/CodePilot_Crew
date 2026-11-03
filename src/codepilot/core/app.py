@@ -166,7 +166,7 @@ async def run_core(
             client = await resources.enter_async_context(httpx.AsyncClient(timeout=model.model_timeout))
             provider = AnthropicProvider(
                 client, base_url=model.base_url, api_key=model.api_key.get_secret_value(),
-                model=model.model, max_tokens=model.max_tokens,
+                model=model.model, max_tokens=model.max_tokens, context_budget=model.context_budget,
             )
             runner = Runner(
                 provider, builtin_registry(), workspace or Path.cwd(), policy=policy,

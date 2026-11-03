@@ -77,7 +77,7 @@ class SessionManager:
                 self.store.checkpoint(turn.session_id, turn.run_id, history + delta, delta)
             usage: dict[str, int] = {}
             for record in self.store.records(turn.run_id):
-                if record["kind"] == "model.response":
+                if record["kind"] in {"model.response", "context.summary.response"}:
                     for key, value in record["data"]["response"].get("usage", {}).items():
                         usage[key] = usage.get(key, 0) + value
             with self.store.transaction():

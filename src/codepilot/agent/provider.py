@@ -19,6 +19,27 @@ SYSTEM_PROMPT = (
     "Give a concise final answer based on observed evidence, and explain tool errors honestly."
 )
 
+DEFAULT_CONTEXT_BUDGET = 65536
+
+
+def request_payload(
+    messages: Sequence[Message], tools: Sequence[ToolDefinition], model: str, max_tokens: int, *, stream: bool,
+) -> dict[str, Any]:
+    return {
+        "model": model,
+        "max_tokens": max_tokens,
+        "stream": stream,
+        "system": SYSTEM_PROMPT,
+        "messages": [item.model_dump() for item in messages],
+        "tools": [item.model_dump() for item in tools],
+    }
+
+
+def request_cost(payload: dict[str, Any]) -> int:
+    # UTF-8 字节是本地保守代理，另留协议余量和生成空间。
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return len(encoded.encode("utf-8")) + payload["max_tokens"] + 1024
+
 
 class ProviderError(RuntimeError):
     def __init__(self, message: str, *, invalid_response: bool = False) -> None:
@@ -91,21 +112,31 @@ def parse_response(raw: Any) -> ModelResponse:
 
 class AnthropicProvider:
     def __init__(
-        self, client: httpx.AsyncClient, *, base_url: str, api_key: str, model: str, max_tokens: int = 1024
+        self, client: httpx.AsyncClient, *, base_url: str, api_key: str, model: str, max_tokens: int = 1024,
+        context_budget: int = DEFAULT_CONTEXT_BUDGET,
     ) -> None:
         self._client = client
         self._endpoint = message_endpoint(base_url)
         self._api_key = api_key
         self._model = model
         self._max_tokens = max_tokens
+        self.context_budget = context_budget
+
+    def estimate_request(self, messages: Sequence[Message], tools: Sequence[ToolDefinition]) -> int:
+        return request_cost(request_payload(messages, tools, self._model, self._max_tokens, stream=False))
+
+    def _checked_payload(
+        self, messages: Sequence[Message], tools: Sequence[ToolDefinition], *, stream: bool,
+    ) -> dict[str, Any]:
+        payload = request_payload(messages, tools, self._model, self._max_tokens, stream=stream)
+        if request_cost(payload) > self.context_budget:
+            raise ProviderError("Model request exceeds the local context budget")
+        return payload
 
     async def stream_complete(
         self, messages: Sequence[Message], tools: Sequence[ToolDefinition], on_text: Callable[[str], None]
     ) -> ModelResponse:
-        payload = {
-            "model": self._model, "max_tokens": self._max_tokens, "stream": True, "system": SYSTEM_PROMPT,
-            "messages": [item.model_dump() for item in messages], "tools": [item.model_dump() for item in tools],
-        }
+        payload = self._checked_payload(messages, tools, stream=True)
         try:
             async with self._client.stream(
                 "POST", self._endpoint, headers={"x-api-key": self._api_key, "anthropic-version": "2023-06-01"},
@@ -125,14 +156,7 @@ class AnthropicProvider:
     async def complete(
         self, messages: Sequence[Message], tools: Sequence[ToolDefinition]
     ) -> ModelResponse:
-        payload = {
-            "model": self._model,
-            "max_tokens": self._max_tokens,
-            "stream": False,
-            "system": SYSTEM_PROMPT,
-            "messages": [item.model_dump() for item in messages],
-            "tools": [item.model_dump() for item in tools],
-        }
+        payload = self._checked_payload(messages, tools, stream=False)
         try:
             response = await self._client.post(
                 self._endpoint,

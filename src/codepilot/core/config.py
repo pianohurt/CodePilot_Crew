@@ -44,6 +44,7 @@ class ModelSettings(BaseModel):
     model: str = Field(min_length=1)
     model_timeout: FiniteFloat = Field(default=30.0, gt=0, le=300)
     max_tokens: int = Field(default=1024, ge=1, le=4096)
+    context_budget: int = Field(default=65536, ge=8192, le=262144)
 
     @field_validator("api_key")
     @classmethod
@@ -75,7 +76,7 @@ def load_model_settings(
 ) -> ModelSettings | None:
     source = process_environ if environ is None else environ
     values: dict[str, object] = {}
-    fields = ("api_key", "base_url", "model", "model_timeout", "max_tokens")
+    fields = ("api_key", "base_url", "model", "model_timeout", "max_tokens", "context_budget")
     file_values: Mapping[str, str | None] = {}
     if env_file is not None:
         if not env_file.is_file():

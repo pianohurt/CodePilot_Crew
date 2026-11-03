@@ -6,6 +6,7 @@ import logging
 from time import perf_counter
 
 from codepilot.agent.provider import Provider, ProviderError
+from codepilot.agent.compact import ContextBudgetError, fit_context
 from codepilot.agent.types import Message, RunResult, TextBlock, ToolReceipt, ToolUse
 from codepilot.core.context import ExecutionContext
 from codepilot.tools.registry import ToolRegistry
@@ -33,14 +34,24 @@ class AgentLoop:
         self._tools = tools
 
     async def run(self, context: ExecutionContext, *, max_steps: int) -> RunResult:
+        working = list(context.messages)
+        current_input = working[-1] if working else None
         for step in range(1, max_steps + 1):
             context.step = step
             if context.events:
                 context.events.emit("step.started", step=step)
+            definitions = self._tools.definitions(context.allowed_tools)
+            try:
+                working = await fit_context(self._provider, context, working, definitions, current_input)
+            except ContextBudgetError as exc:
+                context.record("context.error", error=str(exc))
+                if context.recorder:
+                    context.recorder.trace("context.error", step, error=str(exc))
+                return finish(context, "context_budget", error=str(exc))
+            if context.events:
                 context.events.emit("model.started", step=step)
             logger.info("Model request run_id=%s step=%s", context.run_id, step)
-            messages = tuple(item.model_copy(deep=True) for item in context.messages)
-            definitions = self._tools.definitions(context.allowed_tools)
+            messages = tuple(item.model_copy(deep=True) for item in working)
             context.record("model.request", messages=[item.model_dump() for item in messages], tools=[item.model_dump() for item in definitions])
             if context.recorder:
                 context.recorder.trace("model.request", step, messages=[item.model_dump() for item in messages], tools=[item.model_dump() for item in definitions])
@@ -118,8 +129,10 @@ class AgentLoop:
                 if result.stop_run:
                     return finish(context, "tool_cleanup_failed", error=result.content)
             # 整批结束后再采用这对消息；总超时或取消不会留下半批工作历史。
-            context.adopt([
+            delta = [
                 Message(role="assistant", content=response.content),
                 Message(role="user", content=results),
-            ])
+            ]
+            context.adopt(delta)
+            working.extend(delta)
         return finish(context, "max_steps", error="Model request step budget exhausted")
