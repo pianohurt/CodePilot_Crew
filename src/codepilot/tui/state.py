@@ -42,6 +42,10 @@ class RunView:
             self.tools[event.tool_use_id] = f"{event.data.get('name')} {event.data.get('input')}\n执行中"
         elif event.type == "tool.completed":
             self.tools[event.tool_use_id] = f"{event.data.get('name')} [{event.tool_use_id}]\n{'错误' if event.data.get('is_error') else '完成'}: {event.data.get('content')}"
+        elif event.type in {"agent.spawned", "agent.finished"}:
+            child = event.data["child_run_id"]
+            status = event.data.get("status", "running")
+            self.tools[f"child:{child}"] = f"子任务 {event.data['role']} · {event.data['mode']} · {status}\n{child}"
         elif event.type == "approval.requested":
             self.approvals[event.data["approval_id"]] = event.data
         elif event.type == "approval.resolved":

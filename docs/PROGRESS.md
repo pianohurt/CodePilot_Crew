@@ -7,8 +7,8 @@
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0—S5 本机 Windows 验收完成，206 项离线检查通过。真实模型摘要和健康流式路径已验证，断流故障由离线测试注入。Linux 与远端 CI 尚未验证。
-- 当前版本 0.6.0，已有受控工具、会话恢复、独立原始记录、上下文压缩和流式重试。F10 和“退出”按钮由 c3a9318 引入。
+- S0—S6 本机 Windows 验收完成，219 项离线检查通过。S6 另有真实模型前台交接复验。Linux 与远端 CI 尚未验证。
+- 当前版本 0.7.0，已有受控工具、会话恢复、独立原始记录、上下文压缩、流式重试和多 Agent 委派。F10 和“退出”按钮由 c3a9318 引入。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,7 +50,7 @@
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
 - S5 在模型输入层压缩历史，存储上限继续适用于完整历史。会话恢复读取上下文并重算摘要。流式重试受单步三次尝试和 run 总时限约束。
-- 命令以当前用户权限运行。取消和断连会清理连接拥有的等待及普通命令进程树。下一计划阶段为 S6 多 Agent 委派。
+- 命令以当前用户权限运行。取消和断连会清理连接拥有的等待及普通命令进程树。子任务共享工作区，生命周期限于当前根 run。下一计划阶段为 S7 MCP。
 
 ## 启动设计时的文档检查
 
@@ -217,3 +217,15 @@
 - Windows 全量离线 206 passed in 32.30s，无跳过。报告 artifacts/s5-pytest.txt。S5A 与 S5B 可分别运行 tests/integration/test_s5_context.py 和 tests/integration/test_s5_stream_retry.py 复验。
 - 从锁文件离线构建 codepilot-0.6.0-py3-none-any.whl，独立环境安装 21 个运行时包。源码、wheel 和安装目录的 42 个 Python 模块逐字节一致。安装后的固定响应与真实 deepseek-flash 均完成挂载 TUI 的读取和最终答案核对，分别产生 4 与 147 个增量。报告 artifacts/s5-stream-fixed-installed.json 和 artifacts/s5-stream-real-installed.json。两次安装回归使用健康流，断流恢复的证据来自离线注入。
 - S5A 本地提交 265d457，stage-5 标记 S5B 验收提交。阶段停在 S5。Linux 和远端 CI 未运行，用户配置的 API 分词、预算选择和摘要质量仍以具体任务与端点为准。
+
+## S6 多 Agent 委派与生命周期
+
+- 从 stage-5 的 b6070fe 开始。只读查看旧仓库 cf6fc3a 的工具命名与轮询接口，独立实现本仓库的 RunTree、工具授权和事件关联。
+- 主 Agent 通过 spawn_agent 交接目标、事实、约束和验收要求。Runner 用新消息启动子任务。前台等待完整结果，后台立即返回编号，agent_result 在当前根 run 查询或取消子任务。失败或取消的观察保留结构化状态及工具错误标记。步数耗尽记为失败。
+- planner 和 reviewer 只读。前台 executor 可申请 write_file，后台统一只读。服务端策略和父级允许范围继续生效，显式工具清单可继续收窄。审批通过根连接展示并标注子任务编号。工作区共享，父子消息独立。
+- RunTree 限制一层、每树最多 6 个子任务且同时最多 2 个。根截止时间覆盖整个树，模型请求总量 64，工具调用总量 48。每次流式尝试和摘要均消耗模型请求额度。关闭根 run 时取消并等待未完成子任务，然后发根终态。原先给父子各装计时器会在 Windows 上产生同时触发，统一根计时后，超时的根任务能稳定收回并标记子任务取消。
+- 根事件 agent.spawned 和 agent.finished 带子 run_id，子独立事件记录带父 run_id。TUI 工具区显示子任务状态。根结果 usage 和会话统计按字段汇总根及子任务已经完整收到的模型响应，包含摘要响应。离线固定用量案例验证合计 input_tokens=18、output_tokens=12。
+- 最终全量命令为 pytest -q -p no:cacheprovider --basetemp .cache/s6-release-tests，结果 219 passed in 35.76s。S6 的 13 项专项覆盖前台模块调查和审查、父在后台调查期间真实列目录、四种状态、父级拒绝与 TCP 审批、并发上限、无归属查询、共享预算及正常结束、取消、超时、关闭服务的回收。报告 artifacts/s6-pytest.txt。
+- 真实 deepseek-flash 首次执行两个子任务均成功读取且最终标识正确，但违反脚本要求的根任务只调用委派工具。保留 artifacts/s6-real.json 的失败结果。复验改为直接核对 reviewer 收到 planner 的精确标识以及两个子任务的实际读取。复验通过，根任务 4 步，工具为 list_dir、spawn_agent、spawn_agent、read_file。用量为 input_tokens=2665、cache_creation_input_tokens=0、cache_read_input_tokens=10240、output_tokens=2245。见 artifacts/s6-real-handoff.json。
+- 从锁文件离线构建 0.7.0，在独立环境安装 21 个运行时包。44 个 Python 模块在源码、wheel 和安装目录逐字节一致。使用安装包复跑 S6 的 13 项专项通过，固定响应的挂载 TUI 读文件回归通过。报告 artifacts/s6-fixed-installed.json。
+- stage-6 标记本地验收提交。后台结果随根 run 回收，早期阶段的会话恢复继续处理根会话历史。Linux 和远端 CI 尚未验证。

@@ -99,6 +99,7 @@ async def fit_context(
             raise ContextBudgetError("Recent context or a single history batch exceeds the local budget")
         cut = ends[eligible - 1]
         request = summary_request(working[:cut])
+        context.claim_model()
         context.record("context.summary.request", messages=[item.model_dump() for item in request])
         if context.recorder:
             context.recorder.trace("context.summary.request", context.step, cost=cost(request, ()), budget=budget)

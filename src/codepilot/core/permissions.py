@@ -22,6 +22,8 @@ class PermissionPolicy(BaseModel):
     write_file: Decision = "ask"
     bash: Decision = "ask"
     note_save: Decision = "ask"
+    spawn_agent: Decision = "allow"
+    agent_result: Decision = "allow"
 
     def decision(self, name: str) -> Decision:
         return getattr(self, name, "deny")

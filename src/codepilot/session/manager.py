@@ -75,14 +75,9 @@ class SessionManager:
             if result.status != "success":
                 delta = [Message(role="user", content=[TextBlock(text=INTERRUPTION)])]
                 self.store.checkpoint(turn.session_id, turn.run_id, history + delta, delta)
-            usage: dict[str, int] = {}
-            for record in self.store.records(turn.run_id):
-                if record["kind"] in {"model.response", "context.summary.response"}:
-                    for key, value in record["data"]["response"].get("usage", {}).items():
-                        usage[key] = usage.get(key, 0) + value
             with self.store.transaction():
                 self.store.append(turn.run_id, "run.finished", {"result": result.model_dump()})
-                self.store.db.execute("UPDATE runs SET status=?,result=?,usage=? WHERE id=?", (result.status, self.store.encode(result.model_dump()), self.store.encode(usage), turn.run_id))
+                self.store.db.execute("UPDATE runs SET status=?,result=?,usage=? WHERE id=?", (result.status, self.store.encode(result.model_dump()), self.store.encode(result.usage), turn.run_id))
         except Exception:
             self._failed.add(turn.session_id)
             raise

@@ -26,6 +26,7 @@ async def stream_with_retries(
 
     step = context.step
     for attempt in range(1, len(RETRY_DELAYS) + 2):
+        context.claim_model()
         def on_text(text: str, attempt_number: int = attempt) -> None:
             if context.events:
                 context.events.emit("model.delta", step=step, text=text, attempt=attempt_number)

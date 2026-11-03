@@ -84,3 +84,4 @@ class RunResult(StrictData):
     answer: str = ""
     error: str | None = None
     tool_calls: list[ToolReceipt] = Field(default_factory=list)
+    usage: dict[str, int] = Field(default_factory=dict)

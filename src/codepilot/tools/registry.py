@@ -32,7 +32,7 @@ class ToolError(ValueError):
 class PreparedAction:
     preview: dict[str, Any]
     invoke: Callable[[], Awaitable[str]]
-    timeout: float
+    timeout: float | None
 
 
 @dataclass

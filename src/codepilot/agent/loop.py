@@ -9,7 +9,7 @@ from codepilot.agent.provider import Provider, ProviderError
 from codepilot.agent.compact import ContextBudgetError, fit_context
 from codepilot.agent.streaming import stream_with_retries
 from codepilot.agent.types import Message, RunResult, TextBlock, ToolReceipt, ToolUse
-from codepilot.core.context import ExecutionContext
+from codepilot.core.context import ExecutionContext, RunBudgetError
 from codepilot.tools.registry import ToolRegistry
 from codepilot.tools.registry import bounded_text
 
@@ -26,6 +26,7 @@ def finish(
         run_id=context.run_id, status="success" if reason == "end_turn" else "cancelled" if reason == "cancelled" else "failed",
         stop_reason=reason, steps=context.step, answer=answer, error=error,
         tool_calls=[item.model_copy(deep=True) for item in context.receipts],
+        usage=context.usage.copy(),
     )
 
 
@@ -44,6 +45,8 @@ class AgentLoop:
             definitions = self._tools.definitions(context.allowed_tools)
             try:
                 working = await fit_context(self._provider, context, working, definitions, current_input)
+            except RunBudgetError as exc:
+                return finish(context, "tree_budget", error=str(exc))
             except ContextBudgetError as exc:
                 context.record("context.error", error=str(exc))
                 if context.recorder:
@@ -62,7 +65,10 @@ class AgentLoop:
                 if streaming:
                     response = await stream_with_retries(streaming, context, messages, definitions)
                 else:
+                    context.claim_model()
                     response = await self._provider.complete(messages, definitions)
+            except RunBudgetError as exc:
+                return finish(context, "tree_budget", error=str(exc))
             except asyncio.CancelledError:
                 context.record("model.cancelled")
                 if context.recorder:
@@ -107,6 +113,8 @@ class AgentLoop:
                     raise ValueError("Oversized tool input")
             except (ValueError, TypeError, RecursionError):
                 return finish(context, "invalid_response", error="Invalid or oversized tool input")
+            if context.tree is not None and not context.tree.claim_tools(len(calls)):
+                return finish(context, "tree_budget", error="Run tree tool call budget exhausted")
             context.used_tool_ids.update(ids)
             results = []
             for call in calls:

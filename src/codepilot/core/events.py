@@ -11,6 +11,7 @@ type EventName = Literal[
     "run.started", "step.started", "model.started", "model.delta", "model.completed", "model.retry",
     "tool.started", "tool.completed", "run.finished",
     "approval.requested", "approval.resolved",
+    "agent.spawned", "agent.finished",
 ]
 
 
@@ -27,6 +28,13 @@ class RunEvent(BaseModel):
 
     @model_validator(mode="after")
     def check_payload(self) -> "RunEvent":
+        if self.type.startswith("agent."):
+            if not isinstance(self.data.get("child_run_id"), str) or not self.data["child_run_id"]:
+                raise ValueError("Delegation event requires a child run id")
+            if self.data.get("role") not in ("planner", "executor", "reviewer") or self.data.get("mode") not in ("foreground", "background"):
+                raise ValueError("Invalid child role or mode")
+            if self.type == "agent.finished" and self.data.get("status") not in ("success", "failed", "cancelled"):
+                raise ValueError("Invalid child run status")
         if self.type == "model.retry" or (self.type == "model.delta" and "attempt" in self.data):
             attempt = self.data.get("attempt")
             minimum = 2 if self.type == "model.retry" else 1

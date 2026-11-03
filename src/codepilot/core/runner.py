@@ -9,6 +9,7 @@ from codepilot.agent.loop import AgentLoop, finish
 from codepilot.agent.provider import Provider
 from codepilot.agent.types import Message, RunResult, TextBlock
 from codepilot.core.context import ExecutionContext
+from codepilot.core.delegation import RunTree
 from codepilot.core.events import EventBus, EventListener, RunEvents
 from codepilot.core.records import RunRecorder
 from codepilot.core.permissions import ApprovalCallback, PermissionPolicy
@@ -42,6 +43,7 @@ class Runner:
         cancel_before_start: bool = False,
         approver: ApprovalCallback | None = None,
         session_id: str | None = None, turn: SessionTurn | None = None,
+        _parent_tree: RunTree | None = None, _allowed_tools: frozenset[str] | None = None,
     ) -> RunResult:
         if not goal.strip() or len(goal) > 8000:
             raise ValueError("Goal must contain 1 to 8000 characters")
@@ -55,7 +57,12 @@ class Runner:
                 raise SessionError("Sessions not configured", -32020)
             turn = self.sessions.begin(session_id, run_id, goal)
         context = ExecutionContext(workspace=self.workspace, allowed_tools=self._tools.names, run_id=run_id, streaming=stream)
-        context.policy, context.approver = self._policy, approver
+        context.policy = _parent_tree.root.policy if _parent_tree is not None else self._policy
+        context.approver = approver
+        if _allowed_tools is not None:
+            context.allowed_tools &= _allowed_tools
+        owned_tree = RunTree(self, context) if _parent_tree is None and "spawn_agent" in context.allowed_tools else None
+        context.tree = _parent_tree or owned_tree
         if turn is not None:
             context.session_id = turn.session_id
             context.messages = [item.model_copy(deep=True) for item in turn.history]
@@ -76,15 +83,27 @@ class Runner:
                 remove_event = self.events.subscribe(run_id, on_event)
             try:
                 context.adopt([self.sessions.input_message(turn, goal) if turn else Message(role="user", content=[TextBlock(text=goal)])])
-                context.events.emit("run.started", goal=goal, session_id=context.session_id)
-                async with asyncio.timeout(self._run_timeout):
-                    result = finish(context, "cancelled", error="Run cancelled before execution") if cancel_before_start else await self._loop.run(context, max_steps=max_steps)
+                start_data = {"goal": goal, "session_id": context.session_id}
+                if _parent_tree is not None:
+                    start_data["parent_run_id"] = _parent_tree.root.run_id
+                context.events.emit("run.started", **start_data)
+                try:
+                    # 子任务继承根 run 的截止时间，由根任务统一取消并回收。
+                    async with asyncio.timeout(self._run_timeout if _parent_tree is None else None):
+                        result = finish(context, "cancelled", error="Run cancelled before execution") if cancel_before_start else await self._loop.run(context, max_steps=max_steps)
+                finally:
+                    if owned_tree is not None:
+                        await owned_tree.close()
             except TimeoutError:
                 result = finish(context, "run_timeout", error="Run time budget exhausted")
             except asyncio.CancelledError:
                 result = finish(context, "cancelled", error="Run cancelled")
             except (SessionError, OSError, UnicodeError, ValueError):
                 result = finish(context, "session_error", error="Session/context storage failed; inspect saved state before continuing")
+            if owned_tree is not None:
+                if any(job.result and job.result.stop_reason == "tool_cleanup_failed" for job in owned_tree.jobs.values()):
+                    result = finish(context, "tool_cleanup_failed", error="A child could not confirm tool cleanup")
+                result.usage = owned_tree.usage.copy()
             if turn:
                 self.sessions.finish(turn, result, context.messages)
             context.events.emit("run.finished", step=context.step, result=result.model_dump())

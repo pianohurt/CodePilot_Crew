@@ -1,6 +1,6 @@
 # 项目目标与设计边界
 
-S0—S5 已完成本机 Windows 验收，版本 0.6.0，206 项离线检查通过。S5 的结果包括真实模型上下文压缩与离线流式故障注入。具体结果与限制见 PROGRESS。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew。Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
+S0—S6 已完成本机 Windows 验收，版本 0.7.0，219 项离线检查通过。S6 包含前台委派、后台任务查询与清理，以及真实模型的 planner 和 reviewer 交接验证。具体结果与限制见 PROGRESS。仓库名为 CodePilot_Crew，工作目录为 G:/实习项目/CodePilot_Crew。Python 包与命令均为 codepilot，展示名为 CodePilot Crew。
 
 ## 用户与目的
 
@@ -46,7 +46,7 @@ CodePilot_Crew/
     S0_DESIGN.md
 ```
 
-S1 已新增 agent、tools、context 和 runner；S2 已新增 tui、events、records、SSE 与持久 RPC；S3 已新增 permissions、approvals 及写入/命令工具，Windows 命令由独立 supervisor 和 Job 管理生命周期；S4 已新增 session 的 store/manager/history 与 note_save。S5 在 agent 内增加 compact 与 streaming。后续按阶段新增 subagents、mcp、skills 等职责模块。需要调整边界时，先说明现有问题、替代方案与验证影响，再记录决定。
+S1 建立 agent、tools、context 和 runner。S2 增加 TUI、事件、记录、SSE 与持久 RPC。S3 增加权限、审批及写入和命令工具，Windows 命令由独立 supervisor 和 Job 管理生命周期。S4 增加会话存储和 note_save。S5 增加压缩与流式重试。S6 在 Core 增加委派生命周期，并通过内建工具接入。后续按阶段接入 MCP 与 Skills。
 
 基本依赖方向：界面和客户端通过协议调用 Core；Runner 装配执行上下文与服务；Agent Loop 通过 Provider 和工具接口执行；具体工具不反向依赖 TUI。
 

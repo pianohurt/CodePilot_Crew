@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-当前版本为 0.6.0，S0—S5 已完成本机 Windows 验收，206 项离线检查通过。S5 增加上下文预算、结构化摘要和流式异常恢复。真实模型压缩与流式故障注入的结果分别记录在项目进度中。
+当前版本为 0.7.0，S0—S6 已完成本机 Windows 验收，219 项离线检查通过。S6 增加前台委派、后台调查、结果查询和父子用量汇总。真实模型与离线验证结果见项目进度。
 
-本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩与流式重试。
+本项目的四条能力目标是 Agent 循环与工具调用、多 Agent 编排、上下文压缩与流式重试、MCP 与 Skills。当前已接入受控工具、会话恢复、上下文压缩、流式重试与多 Agent 委派。
 
 ## 本机安装与演示（Windows PowerShell）
 
@@ -22,7 +22,7 @@ uv --cache-dir .cache/uv sync --locked
 uv --cache-dir .cache/uv run --locked codepilot version
 ```
 
-预期输出 `codepilot 0.6.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
+预期输出 `codepilot 0.7.0`。本机默认 uv 缓存初始化失败，所以示例明确使用项目内缓存。
 
 第一个终端启动 Core：
 
@@ -148,6 +148,16 @@ TCP 使用 UTF-8 NDJSON，单帧最多 64 KiB。持久连接通过 id→Future �
 
 流式连接或读取失败时，单个模型步骤最多尝试三次，退避为 100 和 200 毫秒，并受 run 总时限约束。流结束却缺少结束标记也可重试。HTTP 错误状态和已识别的响应格式错误直接结束该步骤。每次尝试重新读取完整响应，界面按 run、step、attempt 清除上次草稿。解析完成的响应进入 AgentLoop 的工具校验，已执行的写入保留在其原步骤。
 
+## 多 Agent 委派
+
+可以在 TUI 请求“请让 planner 读取模块并整理事实，再让 reviewer 对照这些事实独立复核”。主 Agent 用 `spawn_agent` 交接目标、已知事实、约束和验收条件。每个子任务从独立消息开始，前台调用等到子任务结束后，把结构化结果交回主 Agent。
+
+后台调查即时返回 `run_id`，主 Agent 可以先继续其他工作，再调用 `agent_result`。查询支持最多等待 10 秒以及用 `cancel=true` 放弃未完成的调查。结果状态为 `running`、`success`、`failed` 或 `cancelled`。成功表示子任务正常完成了模型回合，结论仍需要对应验收证据。主 Agent 可以在当前 run 内查询自己创建的子任务。
+
+planner 与 reviewer 可以读取文件和列目录，前台 executor 还可在继承策略允许时写文件。实际工具集合取父级权限、角色、请求范围和服务端策略的交集。后台限定只读。子任务共享工作区，因此读到的是当时的文件内容。前台写入审批显示在根任务界面，附带子任务编号。
+
+每个根任务允许一层委派，最多创建 6 个子任务，其中最多 2 个同时执行。默认共享 90 秒截止时间、64 次模型请求和 48 次工具调用的预算。摘要请求和流式重试计入模型次数。根任务正常结束、取消、超时或连接关闭时，会取消并等待未完成子任务。终端工具区显示子任务状态，根结果及会话用量汇总父子已收到的完整模型响应。
+
 ## 验证与学习
 
 ```powershell
@@ -201,6 +211,13 @@ uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test
 uv --cache-dir .cache/uv run --locked python scripts/verify_s5_context.py --env-file .env
 ```
 
+S6 的离线用例包含前台调查与审查、后台调查期间主任务继续工作、子任务权限与生命周期。真实模型复验使用临时模块。
+
+```powershell
+uv --cache-dir .cache/uv run --locked --offline pytest -q tests/integration/test_s6_delegation.py
+uv --cache-dir .cache/uv run --locked python scripts/verify_s6.py --env-file .env
+```
+
 ## 从哪里开始
 
 | 文件 | 用途 |
@@ -213,10 +230,10 @@ uv --cache-dir .cache/uv run --locked python scripts/verify_s5_context.py --env-
 | [S0_VALIDATION.md](docs/S0_VALIDATION.md) | 实际命令、结果、故障与未验证项 |
 | [S0_WALKTHROUGH.md](docs/S0_WALKTHROUGH.md) | 以 ping 解释关键函数、状态、错误路径与取舍 |
 
-每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S5。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
+每阶段按“设计、实现、验证、讲解、更新进度、提交”推进。当前停在 S6。阶段分析文档按当前 docs/ 忽略规则留本地，已跟踪的交接文件随提交更新。
 
 ## 参考与开发方式
 
 设计参考 [KamaClaude](https://github.com/youngyangyang04/KamaClaude)，阶段方法借鉴 [AemeathCode](https://github.com/Nijikasuki/AemeathCode)，使用 AI 辅助编码。固定参考版本与本轮查阅范围见 S0 设计中的来源记录。直接复用代码时另行记录来源并保留适用说明。
 
-本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-5 用于定位已验收阶段。
+本地历史从启动文档开始，随后是安装入口、Core 通信与逐阶段验收。stage-0 至 stage-6 用于定位已验收阶段。
