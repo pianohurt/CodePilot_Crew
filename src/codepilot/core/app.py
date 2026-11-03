@@ -30,7 +30,7 @@ from codepilot.session.manager import SessionManager, SessionTurn
 from codepilot.session.store import SessionError, SessionStore
 from codepilot.mcp.config import McpConfig
 from codepilot.skills import SkillError, SkillInvocation
-from codepilot.protocol.messages import SessionCreateParams, SessionListParams, SessionParams
+from codepilot.protocol.messages import SessionCreateParams, SessionHistoryParams, SessionListParams, SessionParams
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,9 @@ class CoreService:
                 if request.method == "session.resume":
                     params = SessionParams.model_validate(request.params)
                     return self.sessions.resume(params.session_id)
+                if request.method == "session.history":
+                    params = SessionHistoryParams.model_validate(request.params)
+                    return self.sessions.store.history_page(params.session_id, params.before)
             except ValidationError as exc:
                 raise RpcFault(INVALID_PARAMS, "Invalid session parameters") from exc
             raise RpcFault(METHOD_NOT_FOUND, "Unknown session method")

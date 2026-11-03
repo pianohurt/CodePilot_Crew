@@ -57,6 +57,10 @@ class SessionParams(StrictMessage):
     session_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 
 
+class SessionHistoryParams(SessionParams):
+    before: Annotated[int, Field(ge=1, le=2**63-1)] | None = None
+
+
 class SessionCreateParams(StrictMessage):
     title: Annotated[str, Field(min_length=1, max_length=160)] = "新会话"
 

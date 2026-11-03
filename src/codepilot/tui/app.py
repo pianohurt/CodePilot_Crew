@@ -1,4 +1,4 @@
-"""一块回答持续更新，工具详情单独展示；所有界面状态来自协议。"""
+"""会话历史与当前回答共享滚动区，工具和审批单独展示。"""
 
 import asyncio
 import json
@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, Select, Static
 
 from codepilot.core.config import Settings
+from codepilot.protocol.messages import METHOD_NOT_FOUND
 from codepilot.transport.rpc import RpcClient
 from codepilot.tui.state import RunView
 from codepilot.transport.client import RemoteError
@@ -33,6 +34,10 @@ class CodePilotApp(App[None]):
     Button { margin-left: 1; min-width: 10; }
     #status { height: 2; color: $accent; }
     #answer-pane { height: 2fr; border: round $accent; padding: 1; }
+    #answer-pane Static { height: auto; }
+    #older-history { display: none; }
+    #history { display: none; margin-bottom: 1; }
+    #question { color: $accent; }
     #tools-pane { height: 1fr; border: round $secondary; padding: 1; }
     #approval-pane { display: none; height: 16; border: heavy $warning; padding: 1; }
     #approval-details { height: 1fr; }
@@ -50,6 +55,9 @@ class CodePilotApp(App[None]):
         self._consumer: asyncio.Task[None] | None = None
         self.session_id = session_id
         self._session_supported = False
+        self._history: list[str] = []
+        self._history_before: int | None = None
+        self._current_turn = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -66,6 +74,9 @@ class CodePilotApp(App[None]):
             yield Button("取消", id="cancel", disabled=True)
             yield Button("退出", id="quit")
         with VerticalScroll(id="answer-pane"):
+            yield Button("加载更早问答", id="older-history")
+            yield Static("", id="history", markup=False)
+            yield Static("", id="question", markup=False)
             yield Static("提交目标后显示模型进度与回答。", id="answer", markup=False)
         with VerticalScroll(id="tools-pane"):
             yield Static("工具调用与结果将在这里显示。", id="tools", markup=False)
@@ -79,6 +90,7 @@ class CodePilotApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        self.query_one("#answer-pane", VerticalScroll).anchor()
         try:
             await self.client.connect()
             await self.client.call("core.ping", {})
@@ -86,7 +98,7 @@ class CodePilotApp(App[None]):
             try:
                 summary = await self.client.call("session.resume", {"session_id": self.session_id}) if self.session_id else await self.client.call("session.create", {})
                 self._session_supported = True
-                self._select_session(summary)
+                await self._select_session(summary)
                 await self.refresh_sessions()
             except RemoteError as exc:
                 if exc.code != -32020 or self.session_id is not None:
@@ -182,12 +194,39 @@ class CodePilotApp(App[None]):
             await self.action_quit()
         elif event.button.id == "refresh-sessions":
             await self.refresh_sessions()
+        elif event.button.id == "older-history":
+            await self.load_older_history()
         elif event.button.id in {"new-session", "resume-session"}:
             await self.change_session(event.button.id == "new-session")
         elif event.button.id in {"allow", "deny"}:
             await self.respond_approval(event.button.id == "allow")
 
-    def _select_session(self, summary: dict) -> None:
+    def _render_history(self) -> None:
+        history = self.query_one("#history", Static)
+        history.update("\n\n".join(self._history))
+        history.display = bool(self._history)
+        self.query_one("#older-history", Button).display = self._history_before is not None
+
+    async def load_older_history(self) -> None:
+        if self._history_before is None or not self._connected:
+            return
+        try:
+            page = await self.client.call("session.history", {"session_id": self.session_id, "before": self._history_before})
+        except Exception:
+            self.query_one("#status", Static).update("更早的问答读取失败，可重试")
+            return
+        self._history[:0] = [f"你 · {turn['goal']}\n{turn['answer']}" for turn in page["turns"]]
+        self._history_before = page["before"]
+        self._render_history()
+
+    async def _select_session(self, summary: dict) -> None:
+        page = {"turns": [], "before": None}
+        if summary.get("run_count"):
+            try:
+                page = await self.client.call("session.history", {"session_id": summary["id"]})
+            except RemoteError as exc:
+                if exc.code != METHOD_NOT_FOUND:
+                    raise
         self.session_id = summary["id"]
         self.active_run = None
         self.query_one("#start", Button).disabled = not self._connected
@@ -195,7 +234,18 @@ class CodePilotApp(App[None]):
         self.query_one("#session-status", Static).update(f"会话 {self.session_id} · {summary['title']} · {summary['status']}")
         result = summary.get("last_result")
         text = result["answer"] if result and result["status"] == "success" else (result.get("error") or "尚无已完成回答") if result else "新会话 · 等待目标"
+        turns = page["turns"]
+        self._history = [f"你 · {turn['goal']}\n{turn['answer']}" for turn in turns[:-1]]
+        self._history_before = page["before"]
+        self._current_turn = bool(turns or result)
+        question = ""
+        if turns:
+            question = f"你 · {turns[-1]['goal']}"
+            text = turns[-1]["answer"]
+        self._render_history()
+        self.query_one("#question", Static).update(question)
         self.query_one("#answer", Static).update(text)
+        self.query_one("#answer-pane", VerticalScroll).anchor()
         self.query_one("#tools", Static).update("已恢复保存的上下文；不重放旧工具动作。")
 
     async def refresh_sessions(self) -> None:
@@ -217,7 +267,7 @@ class CodePilotApp(App[None]):
             return
         try:
             summary = await self.client.call("session.create", {}) if create else await self.client.call("session.resume", {"session_id": selected})
-            self._select_session(summary)
+            await self._select_session(summary)
             await self.refresh_sessions()
             self.query_one("#status", Static).update("会话已就绪 · 等待目标")
         except Exception:
@@ -241,7 +291,8 @@ class CodePilotApp(App[None]):
         previous = self.views.get(self.active_run)
         if previous is not None and previous.result is None:
             return
-        goal = self.query_one("#goal", Input).value.strip()
+        field = self.query_one("#goal", Input)
+        goal = field.value.strip()
         if not goal:
             self.query_one("#status", Static).update("请先输入目标")
             return
@@ -252,16 +303,24 @@ class CodePilotApp(App[None]):
             if self.session_id:
                 params["session_id"] = self.session_id
             response = await self.client.call("agent.start", params)
-            self.active_run = response["run_id"]
-            self.views.setdefault(self.active_run, RunView(self.active_run, goal=goal))
         except Exception as exc:
             self.query_one("#status", Static).update(f"启动失败：{exc}")
+            self.query_one("#start", Button).disabled = not self._connected
+            return
         finally:
             self._launching = False
-            if self.active_run is not None:
-                self._render_run()
-            else:
-                self.query_one("#start", Button).disabled = not self._connected
+        question = self.query_one("#question", Static)
+        if self._current_turn:
+            answer = self.query_one("#answer", Static).content
+            self._history.append(f"{question.content}\n{answer}")
+            self._render_history()
+        self._current_turn = True
+        question.update(f"你 · {goal}")
+        field.value = ""
+        self.active_run = response["run_id"]
+        self.views.setdefault(self.active_run, RunView(self.active_run, goal=goal))
+        self._render_run()
+        self.query_one("#answer-pane", VerticalScroll).anchor()
 
     async def action_cancel_run(self) -> None:
         if self.active_run is None or not self._connected:

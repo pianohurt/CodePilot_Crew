@@ -3,12 +3,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 import json
 import sys
+from uuid import uuid4
 
 import pytest
+from textual.containers import VerticalScroll
 from textual.widgets import Button, Input, Select, Static
 
 from codepilot.agent.provider import FixedResponseProvider
-from codepilot.agent.types import Message, ModelResponse, TextBlock, ToolDefinition, ToolUse
+from codepilot.agent.types import Message, ModelResponse, RunResult, TextBlock, ToolDefinition, ToolUse
 from codepilot.core.app import CoreService
 from codepilot.core.config import Settings
 from codepilot.core.runner import Runner
@@ -99,9 +101,18 @@ async def test_tui_continues_switches_and_restores_sessions_without_replaying(tm
                 await eventually(lambda: app.active_run != previous_run and app.active_run is not None and app.views[app.active_run].result is not None)
                 await pilot.pause()
             assert 'FIRST_CONTEXT' in str(provider.requests[1])
+            assert str(app.query_one('#history', Static).content) == '你 · first\nFIRST_CONTEXT'
+            assert str(app.query_one('#question', Static).content) == '你 · follow up'
+            assert app.query_one('#goal', Input).value == ''
+            rejected = 'x' * 8001
+            app.query_one('#goal', Input).value = rejected
+            await app.start_run()
+            assert app.query_one('#goal', Input).value == rejected
+            assert '启动失败' in str(app.query_one('#status', Static).content)
             await pilot.click('#new-session')
             await pilot.pause()
             assert app.session_id != first_session
+            assert not app.query_one('#history', Static).display
             app.query_one('#goal', Input).value = 'independent'
             app.query_one('#goal', Input).focus()
             await pilot.press('enter')
@@ -113,6 +124,8 @@ async def test_tui_continues_switches_and_restores_sessions_without_replaying(tm
             await pilot.pause()
             assert app.session_id == first_session
             assert str(app.query_one('#answer', Static).content) == 'SECOND_CONTEXT'
+            assert str(app.query_one('#history', Static).content) == '你 · first\nFIRST_CONTEXT'
+            assert str(app.query_one('#question', Static).content) == '你 · follow up'
             assert len(provider.requests) == 3
             app.query_one('#goal', Input).value = 'continue restored'
             app.query_one('#goal', Input).focus()
@@ -164,6 +177,41 @@ async def test_partial_tool_batch_cancel_keeps_raw_effect_and_never_replays(tmp_
         assert len(provider.requests) == 1
     finally:
         await client.close()
+        await server.close()
+        store.close()
+
+
+async def test_tui_loads_older_turns_from_saved_session(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / ".codepilot", tmp_path)
+    manager = SessionManager(store)
+    session_id = store.create()["id"]
+    for number in range(1, 22):
+        run_id = uuid4().hex
+        turn = manager.begin(session_id, run_id, f"问题 {number:02d}")
+        manager.finish(turn, RunResult(run_id=run_id, status="success", stop_reason="end_turn",
+                                       steps=1, answer=f"回答 {number:02d}"), [])
+    server = SocketServer(CoreService(sessions=manager).handle, port=0)
+    await server.start()
+    app = CodePilotApp(Settings(port=server.port), session_id=session_id)
+    try:
+        async with app.run_test(size=(110, 40)) as pilot:
+            pane = app.query_one("#answer-pane", VerticalScroll)
+            history = app.query_one("#history", Static)
+            older = app.query_one("#older-history", Button)
+            assert older.display
+            assert "问题 01" not in str(history.content)
+            assert str(app.query_one("#answer", Static).content) == "回答 21"
+            await pilot.pause()
+            assert pane.max_scroll_y > 0
+            assert pane.is_vertical_scroll_end, (pane.scroll_y, pane.max_scroll_y)
+            pane.scroll_home(animate=False, immediate=True)
+            await pilot.pause()
+            assert await pilot.click("#older-history")
+            await eventually(lambda: not older.display)
+            assert str(history.content).startswith("你 · 问题 01\n回答 01")
+            assert str(history.content).count("回答 02") == 1
+            assert str(app.query_one("#answer", Static).content) == "回答 21"
+    finally:
         await server.close()
         store.close()
 

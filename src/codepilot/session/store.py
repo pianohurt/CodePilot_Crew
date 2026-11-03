@@ -185,6 +185,37 @@ class SessionStore:
                 result.append({"id": row["id"], "title": row["title"], "status": "corrupt"})
         return result
 
+    def history_page(self, session_id: str, before: int | None) -> dict[str, Any]:
+        session = self.db.execute("SELECT workspace FROM sessions WHERE id=?", (identifier(session_id),)).fetchone()
+        if session is None:
+            raise SessionError("Session not found", -32021)
+        if session["workspace"] != str(self.workspace):
+            raise SessionError("Session belongs to a different workspace")
+        rows = self.db.execute(
+            """SELECT rowid, goal, result FROM runs
+               WHERE session_id=? AND result IS NOT NULL AND (? IS NULL OR rowid < ?)
+               ORDER BY rowid DESC LIMIT 21""",
+            (session_id, before, before),
+        ).fetchall()
+        turns = []
+        # 给 RPC 包头留空间，按实际 JSON 字节控制分页。
+        remaining = 56 * 1024
+        for row in rows[:20]:
+            try:
+                result = RunResult.model_validate_json(row["result"])
+            except ValueError as exc:
+                raise SessionError("Session result is corrupt") from exc
+            turn = {"goal": row["goal"], "answer": result.answer if result.status == "success" else "草稿未采纳；" + (result.error or "")}
+            size = len(json.dumps(turn, ensure_ascii=False).encode()) + 1
+            if size > remaining:
+                if turns:
+                    break
+                turn = {key: value[:4500] + ("\n…（显示已截断）" if len(value) > 4500 else "") for key, value in turn.items()}
+                size = len(json.dumps(turn, ensure_ascii=False).encode()) + 1
+            turns.append(turn)
+            remaining -= size
+        return {"turns": list(reversed(turns)), "before": rows[len(turns) - 1]["rowid"] if len(rows) > len(turns) else None}
+
     def _recover(self) -> None:
         for row in self.db.execute("SELECT id,session_id FROM runs WHERE status='running'").fetchall():
             result = RunResult(run_id=row["id"], status="failed", stop_reason="interrupted", steps=0, error=INTERRUPTION)

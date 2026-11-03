@@ -262,3 +262,9 @@
 - 独立安装版执行同一真实任务三次，首轮均在第一个模型请求返回 provider_error，工具派发为 0。初始报告保存在 artifacts/s9-real-initial.json。单独诊断收到 HTTP 503。
 - 用户告知服务应已恢复后，使用现有配置和独立安装的 1.0.0 执行 scripts/evaluate_s9.py --env-file .env --trials 3 --output artifacts/s9-real.json，deepseek-flash 复跑 3/3。每轮两次模型请求、一次真实文件读取、零重复派发和零人工介入。均返回正确文件名和标识，文件内容核对一致。耗时与 token 见 EVALUATION.md。stage-9 标记本地验收提交。
 - CI 增加固定任务集和干净 wheel 安装检查，矩阵为 Windows 与 Ubuntu。远端 CI 等待远端运行。
+
+## S9 后续 TUI 问答交互
+
+- 参考旧仓库的会话滚动与提交后清空输入。当前轮的流式回答位于滚动区末尾，前几轮问答继续可见。滚动回看时暂停自动跟随。Core 接受提交后清空输入，拒绝提交时保留输入。
+- 从 SQLite 已有运行记录分页恢复问答，无需迁移。最多每页 20 轮，按协议字节上限控制响应大小。超过单页容量的一轮显示截断提示，保存的数据仍保留。
+- Windows 全量 245 passed in 44.86s。挂载 Textual 的测试覆盖连续提问、提交拒绝保留输入、会话隔离、恢复旧记录与加载更早问答。使用固定响应和真实本地 TCP，本轮未请求真实模型。日志见 artifacts/tui-history-pytest.txt。
