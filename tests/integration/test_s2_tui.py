@@ -11,6 +11,7 @@ from codepilot.core.config import Settings
 from codepilot.core.runner import Runner
 from codepilot.tools.readonly import readonly_registry
 from codepilot.transport.server import SocketServer
+from codepilot.transport.rpc import RpcClient
 from codepilot.tui.app import CodePilotApp
 
 
@@ -38,11 +39,12 @@ class GatedProvider:
         return ModelResponse(content=[TextBlock(text="最终完整回答 ✅")], stop_reason="end_turn")
 
 
-@pytest.mark.parametrize("mode", ["complete", "cancel", "disconnect"])
+@pytest.mark.parametrize("mode", ["complete", "cancel", "disconnect", "quit_key", "quit_button"])
 async def test_mounted_tui_stream_tools_and_terminal_state(tmp_path: Path, mode: str) -> None:
     (tmp_path / "sample.txt").write_text("actual tool evidence", encoding="utf-8")
     provider = GatedProvider()
-    server = SocketServer(CoreService(Runner(provider, readonly_registry(), tmp_path)).handle, port=0)
+    service = CoreService(Runner(provider, readonly_registry(), tmp_path))
+    server = SocketServer(service.handle, port=0)
     await server.start()
     app = CodePilotApp(Settings(port=server.port))
     try:
@@ -67,15 +69,31 @@ async def test_mounted_tui_stream_tools_and_terminal_state(tmp_path: Path, mode:
                 assert app.views[app.active_run].status == "cancelled"
                 assert "草稿未采纳" in str(app.query_one("#answer", Static).content)
                 assert "已取消" in str(app.query_one("#status", Static).content)
-            else:
+            elif mode == "disconnect":
                 await server.close()
                 await eventually(lambda: "连接断开" in str(app.query_one("#status", Static).content))
                 assert app.query_one("#start", Button).disabled
+            else:
+                if mode == "quit_key":
+                    await pilot.press("f10")
+                else:
+                    await pilot.click("#quit")
+                await eventually(lambda: not app.is_running)
+        if mode in {"quit_key", "quit_button"}:
+            await eventually(lambda: not service._jobs)
+            assert not provider.release.is_set()
+            observer = RpcClient(server.host, server.port)
+            try:
+                await observer.connect()
+                assert (await observer.call("core.ping", {}))["message"] == "pong"
+            finally:
+                await observer.close()
     finally:
         await server.close()
 
 
-async def test_tui_connection_failure_stays_usable() -> None:
+@pytest.mark.parametrize("exit_action", ["f10", "button"])
+async def test_tui_connection_failure_stays_usable(exit_action: str) -> None:
     import socket
     with socket.socket() as reserved:
         reserved.bind(("127.0.0.1", 0))
@@ -83,3 +101,9 @@ async def test_tui_connection_failure_stays_usable() -> None:
         async with app.run_test() as pilot:
             assert "连接失败" in str(app.query_one("#status", Static).content)
             assert app.query_one("#start", Button).disabled
+            app.query_one("#goal", Input).focus()
+            if exit_action == "f10":
+                await pilot.press("f10")
+            else:
+                await pilot.click("#quit")
+            await eventually(lambda: not app.is_running)

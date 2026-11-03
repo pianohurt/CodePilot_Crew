@@ -82,7 +82,9 @@ uv --cache-dir .cache/uv run --locked codepilot tui
 
 write_file 和 bash 默认每次询问。核对审批区完整内容、解析后的路径、实际脚本和超时，再点“允许本次”或“拒绝本次”；长内容可以滚动查看。审批等待最多 60 秒，拒绝、超时、取消或断连均不执行等待中的动作；其他连接不能代为批准。授权不持久保存。
 
-Ctrl+C 或“取消”发送取消请求，收到 run.finished 才显示已取消；Ctrl+Q 退出界面。断开连接会取消该连接拥有的运行，Core 自身继续监听。TUI 当前一次运行一个目标，不含会话恢复、自动重连或后台任务持久化。
+Ctrl+C 或“取消”发送取消请求，收到 run.finished 才显示已取消；F10 或“退出”按钮退出界面。退出会关闭连接并取消该连接拥有的运行，Core 自身继续监听，等待审批的动作不会获准执行。TUI 当前一次运行一个目标，不含会话恢复、自动重连或后台任务持久化。
+
+VS Code 集成终端可能先处理 Ctrl+Q 等快捷键，TUI 无法接收这些按键；应用内部的优先级绑定不能覆盖编辑器快捷键。Ctrl+Q 仍作为兼容绑定保留，使用时优先按 F10 或点击“退出”。若 F10 也被自定义快捷键占用，可点击按钮或用 Tab 聚焦“退出”后按 Enter。无需修改 VS Code 设置，相关机制见 [VS Code 终端快捷键文档](https://code.visualstudio.com/docs/terminal/advanced#_keyboard-shortcuts-and-the-shell)。
 
 Core 默认将脱敏记录写入 `artifacts/runs/<run_id>/`，也可用 --record-dir 指定目录：events.jsonl 是进度事件，trace.jsonl 是模型请求、响应、API 用量、耗时、错误和取消。它们不是会话原始记录；省略 thinking 正文/签名，超长记录明确截断，不记录请求头或配置密钥。API 未返回用量时保留为空，不估造 token 数。
 

@@ -9,6 +9,7 @@
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
 - S0—S3 本机 Windows 验收完成；164 项离线测试通过，独立安装后的固定响应与真实 deepseek-flash 修复案例分别通过。用户已推送 S1，本轮 S2/S3 均未 push；S4—S9 未开始，Linux 和远端 CI 本轮未验证。
 - 当前版本 0.4.0，已有 Agent、真实 SSE、连接事件、启动/取消、JSONL、Textual，以及受控写入/命令、三态权限和逐次审批。
+- 用户反馈 VS Code 拦截 Ctrl+Q 后，TUI 退出入口改为 F10 和“退出”按钮；相关验证与边界见下方修复记录，未进入 S4。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -162,3 +163,12 @@
 - 收尾检查：17 份 Markdown、29 个本地链接、围栏和 4 个 JSON 示例有效；wheel 中 35 个 Python 模块与当前源码逐字节一致，不含配置/缓存/字节码；4 份 SVG 可解析，4 个 S3 演示共 664 条事件通过类型、seq、run_id 与最终状态检查。已跟踪内容和上述证据未检出配置密钥，.env、证据和新增阶段文档均被忽略；`git diff --check` 通过。
 - 只保证正常超时/取消/关闭路径的普通命令进程树清理，不提供恶意脚本隔离、外部服务回收或强制杀死 Core 后的恢复；应用层写入检查也不保证抵抗恶意并发路径替换。Linux、远端 CI、人工键盘演示未验证。
 - 旧 CodePilot 只读复核：工作树仍干净，HEAD=75a4fdf7a3d5ff770dfc9c136b3b1881c912ba35，未被修改。
+
+## TUI 退出快捷键修复：2026-11-03
+
+- 用户人工反馈：在 VS Code 集成终端中 Ctrl+Q 打开编辑器设置而未退出 TUI。结合 VS Code 官方终端快捷键文档，推断按键被宿主编辑器先处理；Textual 的 priority 只对已到达应用的按键生效。未在用户当前 VS Code 配置中独立复现具体命令映射。
+- 页脚将退出键改为 F10，控制栏增加始终可用的“退出”按钮；Ctrl+Q 作为隐藏兼容绑定保留，Ctrl+C 仍只取消当前任务。若宿主也占用 F10，可点击按钮或用 Tab 聚焦后按 Enter。没有修改用户的 VS Code 设置。
+- 两个出口共用 Textual 的 action_quit → exit → on_unmount → RpcClient.close，Core 在连接断开后取消该连接的运行并结束待审批 Future，Core 本身继续监听。没有增加审批自动通过或任务恢复逻辑，也未开始 S4。
+- 实际验证命令：`uv run --locked --offline pytest -q -p no:cacheprovider --basetemp <工作区内已核验的独立目录> tests/integration/test_s2_tui.py tests/integration/test_s3_approvals.py`，18 passed in 4.41s，无跳过。覆盖输入框聚焦/连接失败时退出、流式运行中按键与按钮退出、等待写入审批时退出、任务/审批清理及退出后新连接 ping；待审批文件保持原内容，模型没有进入下一次请求。
+- 这是实际挂载 Textual 的离线自动化与真实 TCP 验证，按键由 Pilot 注入；未新增真实模型调用，未执行当前 VS Code 的人工按键验证。本轮只运行上述相关测试，S3 的 164 项全套通过记录属于前次验收。
+- README 已同步快捷键、备用按钮与宿主拦截原因。修复作为独立本地提交保存，保留现有阶段标签和版本 0.4.0，不 push。

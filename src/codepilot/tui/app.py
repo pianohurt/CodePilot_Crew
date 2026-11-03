@@ -16,7 +16,12 @@ from codepilot.tui.state import RunView
 
 class CodePilotApp(App[None]):
     TITLE = "CodePilot Crew · 编程工作台"
-    BINDINGS: ClassVar = [Binding("ctrl+q", "quit", "退出", priority=True), Binding("ctrl+c", "cancel_run", "取消运行", priority=True)]
+    BINDINGS: ClassVar = [
+        Binding("f10", "quit", "退出", priority=True),
+        # 编辑器可能先截获 Ctrl+Q；页脚提供 F10，并保留原快捷键兼容独立终端。
+        Binding("ctrl+q", "quit", "退出", show=False, priority=True),
+        Binding("ctrl+c", "cancel_run", "取消运行", priority=True),
+    ]
     CSS = """
     Screen { padding: 1 2; }
     #controls { height: 3; }
@@ -47,6 +52,7 @@ class CodePilotApp(App[None]):
             yield Input(placeholder="输入任务，例如：定位错误、提出修改并运行检查", id="goal")
             yield Button("开始", id="start", variant="primary", disabled=True)
             yield Button("取消", id="cancel", disabled=True)
+            yield Button("退出", id="quit")
         with VerticalScroll(id="answer-pane"):
             yield Static("提交目标后显示模型进度与回答。", id="answer", markup=False)
         with VerticalScroll(id="tools-pane"):
@@ -129,6 +135,8 @@ class CodePilotApp(App[None]):
             await self.start_run()
         elif event.button.id == "cancel":
             await self.action_cancel_run()
+        elif event.button.id == "quit":
+            await self.action_quit()
         elif event.button.id in {"allow", "deny"}:
             await self.respond_approval(event.button.id == "allow")
 

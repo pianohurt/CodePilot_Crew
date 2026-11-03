@@ -123,6 +123,38 @@ async def test_mounted_tui_shows_full_preview_and_accepts_once(tmp_path: Path, a
         await server.close()
 
 
+@pytest.mark.parametrize("exit_action", ["f10", "button"])
+async def test_tui_exit_during_approval_leaves_file_unchanged(tmp_path: Path, exit_action: str) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before", encoding="utf-8")
+    provider = write_script()
+    service = CoreService(Runner(provider, builtin_registry(), tmp_path))
+    server = SocketServer(service.handle, port=0)
+    await server.start()
+    app = CodePilotApp(Settings(port=server.port))
+    try:
+        async with app.run_test(size=(110, 50)) as pilot:
+            app.query_one("#goal", Input).value = "edit"
+            await pilot.click("#start")
+            async with asyncio.timeout(3):
+                while not service.approvals._pending or not app.active_run or not app.views[app.active_run].approvals:
+                    await asyncio.sleep(0.01)
+            if exit_action == "f10":
+                await pilot.press("f10")
+            else:
+                await pilot.click("#quit")
+            async with asyncio.timeout(3):
+                while app.is_running:
+                    await asyncio.sleep(0.01)
+        async with asyncio.timeout(3):
+            while service._jobs or service.approvals._pending:
+                await asyncio.sleep(0.01)
+        assert target.read_text(encoding="utf-8") == "before"
+        assert len(provider.requests) == 1
+    finally:
+        await server.close()
+
+
 async def test_legacy_cli_path_cannot_silently_approve(tmp_path: Path) -> None:
     (tmp_path / "sample.txt").write_text("before", encoding="utf-8")
     provider = write_script()
