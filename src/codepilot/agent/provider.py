@@ -1,12 +1,15 @@
 """非流式 Anthropic Messages 适配与可注入的固定响应 Provider。"""
 
-from collections.abc import Sequence
+import asyncio
+import json
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 import httpx
 from pydantic import ValidationError
 
 from codepilot.agent.types import Message, ModelResponse, ToolDefinition
+from codepilot.agent.sse import collect_message
 
 SYSTEM_PROMPT = (
     "You are a read-only local coding assistant. Use read_file and list_dir to inspect the workspace. "
@@ -43,6 +46,17 @@ class FixedResponseProvider:
             raise ProviderError("Fixed response script exhausted")
         return self._responses.pop(0).model_copy(deep=True)
 
+    async def stream_complete(
+        self, messages: Sequence[Message], tools: Sequence[ToolDefinition], on_text: Callable[[str], None]
+    ) -> ModelResponse:
+        response = await self.complete(messages, tools)
+        for block in response.content:
+            if block.type == "text":
+                for offset in range(0, len(block.text), 16):
+                    on_text(block.text[offset:offset + 16])
+                    await asyncio.sleep(0)
+        return response
+
 
 def message_endpoint(base_url: str) -> str:
     base = base_url.rstrip("/")
@@ -53,6 +67,7 @@ def message_endpoint(base_url: str) -> str:
 
 def parse_response(raw: Any) -> ModelResponse:
     try:
+        json.dumps(raw, allow_nan=False)
         if not isinstance(raw, dict) or not isinstance(raw.get("content"), list):
             raise ValueError("Missing content list")
         blocks: list[dict[str, Any]] = []
@@ -67,7 +82,8 @@ def parse_response(raw: Any) -> ModelResponse:
                 blocks.append({key: block.get(key) for key in ("type", "id", "name", "input")})
             else:
                 raise ValueError("Unsupported content block")
-        return ModelResponse.model_validate({"content": blocks, "stop_reason": raw.get("stop_reason")})
+        usage = {key: value for key, value in (raw.get("usage") or {}).items() if type(value) is int}
+        return ModelResponse.model_validate({"content": blocks, "stop_reason": raw.get("stop_reason"), "usage": usage})
     except (ValueError, ValidationError) as exc:
         raise ProviderError("Malformed or unsupported model response", invalid_response=True) from exc
 
@@ -81,6 +97,29 @@ class AnthropicProvider:
         self._api_key = api_key
         self._model = model
         self._max_tokens = max_tokens
+
+    async def stream_complete(
+        self, messages: Sequence[Message], tools: Sequence[ToolDefinition], on_text: Callable[[str], None]
+    ) -> ModelResponse:
+        payload = {
+            "model": self._model, "max_tokens": self._max_tokens, "stream": True, "system": SYSTEM_PROMPT,
+            "messages": [item.model_dump() for item in messages], "tools": [item.model_dump() for item in tools],
+        }
+        try:
+            async with self._client.stream(
+                "POST", self._endpoint, headers={"x-api-key": self._api_key, "anthropic-version": "2023-06-01"},
+                json=payload, follow_redirects=False,
+            ) as response:
+                if not response.is_success:
+                    raise ProviderError(f"Model endpoint returned HTTP {response.status_code}")
+                raw = await collect_message(response.aiter_lines(), on_text)
+            return parse_response(raw)
+        except httpx.TimeoutException as exc:
+            raise ProviderError("Model stream timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError("Model stream connection failed") from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProviderError("Incomplete or invalid model stream", invalid_response=True) from exc
 
     async def complete(
         self, messages: Sequence[Message], tools: Sequence[ToolDefinition]

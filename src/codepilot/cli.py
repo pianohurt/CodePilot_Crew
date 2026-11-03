@@ -54,6 +54,7 @@ def main() -> int:
     core.add_argument("--log-level")
     core.add_argument("--workspace", type=Path, default=Path.cwd())
     core.add_argument("--env-file", type=Path)
+    core.add_argument("--record-dir", type=Path)
     probe = commands.add_parser("ping", help="探活已有 Core，不自动启动")
     probe.add_argument("--port", type=int)
     probe.add_argument("--timeout", type=float)
@@ -63,6 +64,9 @@ def main() -> int:
     run.add_argument("--timeout", type=float)
     run.add_argument("--max-steps", type=int, default=8)
     run.add_argument("--json", action="store_true")
+    tui = commands.add_parser("tui", help="连接已有 Core 并打开终端工作台")
+    tui.add_argument("--port", type=int)
+    tui.add_argument("--timeout", type=float)
     args = parser.parse_args()
     if args.command == "version":
         print(f"codepilot {get_version()}")
@@ -89,9 +93,13 @@ def main() -> int:
         return 2
     configure_logging(settings.log_level)
     try:
+        if args.command == "tui":
+            from codepilot.tui.app import CodePilotApp
+            CodePilotApp(settings).run()
+            return 0
         if args.command == "run":
             return asyncio.run(run_agent(settings, args.goal, args.max_steps, args.json))
-        asyncio.run(run_core(settings, workspace=args.workspace, model=model) if args.command == "core" else ping(settings))
+        asyncio.run(run_core(settings, workspace=args.workspace, model=model, record_dir=args.record_dir) if args.command == "core" else ping(settings))
         return 0
     except KeyboardInterrupt:
         return 0 if args.command == "core" else 1

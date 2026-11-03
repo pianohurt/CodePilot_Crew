@@ -1,4 +1,4 @@
-"""逐连接并发、连接内串行的最小服务端。"""
+"""读循环独立、请求并发处理，单一写队列保证完整帧不交错。"""
 
 import asyncio
 import logging
@@ -27,6 +27,7 @@ from codepilot.transport.framing import (
     read_frame,
     write_frame,
 )
+from codepilot.transport.peer import CURRENT_PEER, PeerConnection
 
 logger = logging.getLogger(__name__)
 type Handler = Callable[[Request], Awaitable[dict[str, Any]]]
@@ -51,6 +52,7 @@ class SocketServer:
         self._closing = False
         self._tasks: set[asyncio.Task[None]] = set()
         self._writers: set[asyncio.StreamWriter] = set()
+        self._peers: set[PeerConnection] = set()
 
     async def start(self) -> None:
         if self._server is not None:
@@ -58,7 +60,7 @@ class SocketServer:
         self._closing = False
         # 绑定本身才是端口是否可用的最终依据，不先探测再绑定。
         self._server = await asyncio.start_server(
-            self._accept, self.host, self.port, limit=MAX_FRAME_BYTES
+            self._accept, self.host, self.port, limit=MAX_FRAME_BYTES - 1
         )
         self.port = self._server.sockets[0].getsockname()[1]
 
@@ -80,38 +82,49 @@ class SocketServer:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         peer = writer.get_extra_info("peername")
+        connection = PeerConnection(writer, self._io_timeout)
+        self._peers.add(connection)
+        pump = asyncio.create_task(connection.pump())
         logger.debug("Connected peer=%s", peer)
         try:
             while not self._closing:
                 try:
-                    frame = await read_frame(reader, self._io_timeout)
+                    frame = await read_frame(reader, self._io_timeout, allow_idle=True)
                 except FrameTooLarge:
-                    await write_frame(
-                        writer,
-                        failure(None, FRAME_TOO_LARGE, "Frame exceeds 64 KiB").model_dump(),
-                        self._io_timeout,
-                    )
+                    await write_frame(writer, failure(None, FRAME_TOO_LARGE, "Frame exceeds 64 KiB").model_dump(), self._io_timeout)
                     break
                 if frame is None:
                     break
-                response = await self._process(frame)
                 try:
-                    await write_frame(writer, response.model_dump(), self._io_timeout)
-                except FrameTooLarge:
-                    await write_frame(
-                        writer, failure(response.id, -32002, "Response exceeds frame limit").model_dump(),
-                        self._io_timeout,
-                    )
+                    parsed = Request.model_validate(decode_frame(frame))
+                except (ValueError, RecursionError):
+                    connection.reply(await self._process(frame))
+                    continue
+                if parsed.id in connection.requests or len(connection.requests) >= 32:
+                    connection.reply(failure(parsed.id, INVALID_REQUEST, "Duplicate id or too many pending requests"))
+                    continue
+                task = asyncio.create_task(self._serve_request(connection, parsed.id, frame))
+                connection.requests[parsed.id] = task
         except (OSError, TimeoutError) as exc:
             logger.info("Connection ended peer=%s reason=%s", peer, type(exc).__name__)
         except Exception:
             logger.exception("Connection failed peer=%s", peer)
         finally:
             try:
+                await connection.finish(pump)
                 await close_writer(writer)
             finally:
+                self._peers.discard(connection)
                 self._writers.discard(writer)
                 logger.debug("Disconnected peer=%s", peer)
+
+    async def _serve_request(self, connection: PeerConnection, request_id: str, frame: bytes) -> None:
+        token = CURRENT_PEER.set(connection)
+        try:
+            connection.reply(await self._process(frame))
+        finally:
+            connection.requests.pop(request_id, None)
+            CURRENT_PEER.reset(token)
 
     async def _process(self, frame: bytes) -> Success | Failure:
         try:
@@ -138,6 +151,8 @@ class SocketServer:
             return
         self._closing = True
         self._server.close()
+        for connection in tuple(self._peers):
+            connection.disconnect()
         for writer in tuple(self._writers):
             writer.close()
         tasks = tuple(self._tasks)

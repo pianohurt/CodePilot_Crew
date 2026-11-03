@@ -59,6 +59,7 @@ class Message(StrictData):
 class ModelResponse(StrictData):
     content: list[AssistantBlock]
     stop_reason: str
+    usage: dict[str, int] = Field(default_factory=dict)
 
 
 class ToolDefinition(StrictData):
@@ -76,7 +77,7 @@ class ToolReceipt(StrictData):
 
 class RunResult(StrictData):
     run_id: str
-    status: Literal["success", "failed"]
+    status: Literal["success", "failed", "cancelled"]
     stop_reason: str
     steps: int
     answer: str = ""

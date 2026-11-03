@@ -13,7 +13,16 @@ class FrameTooLarge(ValueError):
     pass
 
 
-async def read_frame(reader: asyncio.StreamReader, timeout: float = IO_TIMEOUT) -> bytes | None:
+async def read_frame(
+    reader: asyncio.StreamReader, timeout: float = IO_TIMEOUT, *, allow_idle: bool = False
+) -> bytes | None:
+    head = b""
+    if allow_idle:
+        head = await reader.read(1)
+        if not head:
+            return None
+        if head == b"\n":
+            return head
     try:
         async with asyncio.timeout(timeout):
             frame = await reader.readuntil(b"\n")
@@ -22,6 +31,7 @@ async def read_frame(reader: asyncio.StreamReader, timeout: float = IO_TIMEOUT) 
         return None
     except asyncio.LimitOverrunError as exc:
         raise FrameTooLarge("Frame exceeds 64 KiB") from exc
+    frame = head + frame
     if len(frame) > MAX_FRAME_BYTES:
         raise FrameTooLarge("Frame exceeds 64 KiB")
     return frame

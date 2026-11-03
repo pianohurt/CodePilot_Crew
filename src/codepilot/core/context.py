@@ -5,6 +5,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from codepilot.agent.types import Message, ToolReceipt
+from codepilot.core.events import RunEvents
+from codepilot.core.records import RunRecorder
 
 
 @dataclass
@@ -16,3 +18,6 @@ class ExecutionContext:
     used_tool_ids: set[str] = field(default_factory=set)
     receipts: list[ToolReceipt] = field(default_factory=list)
     step: int = 0
+    events: RunEvents | None = None
+    recorder: RunRecorder | None = None
+    streaming: bool = False

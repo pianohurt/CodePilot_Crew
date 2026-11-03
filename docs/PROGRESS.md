@@ -1,14 +1,14 @@
 # 当前进度与会话交接
 
-更新时间：2026-11-02。
+更新时间：2026-11-03。
 
 ## 当前状态
 
 - 项目：CodePilot Crew；仓库名：CodePilot_Crew；工作目录：G:/实习项目/CodePilot_Crew。
 - 用户已确认 Python 包与命令均保留 codepilot。
 - 启动设计已整理于 [S0_DESIGN.md](S0_DESIGN.md)，包含目标边界、S0 最小结构、模块职责、外部接口、故障验收与提交节点。
-- S0、S1 实现、验证与讲解完成，本机 Windows 验收通过；S2—S9 未开始，Linux 和远端 CI 本轮未验证。
-- 当前版本 0.2.0，已有 core/ping/version/run、Provider、独立 ExecutionContext、Runner/AgentLoop、ToolRegistry 与受范围约束的 read_file/list_dir。
+- S0、S1 验收完成，用户已推送 S1；S2 功能及行为验证已完成，独立安装与交接收尾中；S3—S9 未开始，Linux 和远端 CI 本轮未验证。
+- 当前版本 0.3.0，已有只读 Agent、真实 SSE、单连接响应/事件多路复用、启动/取消、JSONL 记录与基础 Textual TUI。
 - 用户已关联 origin=https://github.com/pianohurt/CodePilot_Crew.git，起点为用户提交 b7386f0（忽略本地 docs/）。保留 stage-0=eda390d。本轮只做本地提交，未 push，也未联网查询远端 CI。
 - 旧 G:/实习项目/CodePilot 保留为只读参考，新项目不导入旧 Git 历史。
 
@@ -50,7 +50,7 @@
 - CI 文件已配置 Windows/Linux + Python 3.12；远端由用户关联，本轮未查询 GitHub CI，Linux 尚无本机实测结果。
 - Windows 控制台真实 CTRL_C_EVENT 已验证；人工在键盘上按 Ctrl+C 的演示未执行。两者明确区分。
 - S1 只实现只读 Agent，没有写入/命令、事件流、TUI、持久化、压缩、多 Agent、MCP 或 Skills。客户端超时不等于 Core 已取消；Core 另有 90 秒运行预算。
-- 已授权 S1。完成交接后等待用户指定 S2，不自动开始后续阶段或 push。
+- 已授权 S2。结束后等待用户指定 S3，不自动开始后续阶段或 push。
 
 ## 启动设计时的文档检查
 
@@ -111,3 +111,17 @@
 - status=success 只表示循环正常给出最终文本，不自动判断任意任务达成。本案例通过额外文件标记核对证明读取任务完成。
 - 阶段到此为止，等待用户指定 S2；无自动 push、无后续阶段实现。
 - 收尾检查：11 份 Markdown、29 个本地链接、代码围栏与 JSON 示例有效；0.2.0 wheel 的全部 Python 模块与当前源码一致，归档不含缓存/配置/字节码；已跟踪内容未检出本机配置密钥。确认 .env、运行证据与新增 S1 分析文档被忽略，`git diff --check` 通过。旧 CodePilot 工作树仍干净，HEAD 不变。
+
+## S2 实施记录：功能与行为验证
+
+- 起点：291665d，main 与 origin/main 的本地跟踪记录一致，用户确认已推送 S1；没有改动用户 docs/ 忽略规则。
+- 设计记录在本地 S2_DESIGN.md。实现 EventBus/RunEvent、按 run_id 的 JSONL events 与模型 Trace，包含请求、响应、API usage、耗时、错误和取消；省略 thinking 正文/签名并替换配置密钥，过长记录明确截断，不声称是会话原始记录。
+- 持久 TCP 连接用独立读循环、并发请求、单一写队列；客户端用 id→Future 分流响应与事件。空闲连接保留，残帧超时；断连结束全部等待者并取消本连接拥有的运行。
+- agent.start 返回 run_id；agent.cancel 限制连接归属。取消是请求→Core 清理→run.finished 确认，处理了开始前取消竞态。队列和并发有上限，超限明确断连，不悄悄丢最终事件。
+- 真实 SSE 重建完整响应后才执行工具；半截输入、缺少 message_stop、NaN、错误响应均不会执行工具。没有自动重试。
+- TUI 用 run_id+step 分开草稿，model.completed 替换步骤文本，最终回答以 run.finished 为准；失败/取消不把草稿当完成，工具结果可查看。
+- 首轮回归 6 failed/99 passed：事件参数重名导致工具事件失败，首字节处理导致刚好超长的无换行消息未报帧超限。修正后原 S0/S1 的 105 项通过。
+- 新 TUI 测试首轮 14 passed/1 failed：Ctrl+C 被控件快捷键处理；改为优先级绑定后，通过真实挂载的取消检查。后续补齐边界，最终 `uv run --locked --offline pytest -q` 为 130 passed in 12.39s，无跳过。
+- 固定流真实挂载演示通过：4 条文本增量、真实文件读取、下一请求观察与最终显示一致。真实 deepseek-flash 挂载演示通过：96 条增量事件、真实随机标记读取与最终显示一致；两类结果不混用。
+- Windows 0.3.0 真实 CTRL_C_EVENT 回归：端口 64294 两次退出均 0、耗时均 0.359 秒，同端口重启与活动连接清理通过；不是人工键盘演示。
+- 已讲解增量/步骤完成/最终回答、取消确认与连接归属。独立安装、最终说明和提交交接在收尾节点记录；不自动 push。

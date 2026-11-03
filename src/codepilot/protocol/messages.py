@@ -52,6 +52,10 @@ class AgentRunParams(StrictMessage):
     max_steps: Annotated[int, Field(ge=1, le=32)] = 8
 
 
+class CancelParams(StrictMessage):
+    run_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
+
+
 RESPONSE = TypeAdapter(Success | Failure)
 
 

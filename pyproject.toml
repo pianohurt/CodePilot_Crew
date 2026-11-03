@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codepilot"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local coding agent, developed one verifiable stage at a time."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.11,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
+dependencies = ["pydantic>=2.11,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2", "textual>=6,<9"]
 
 [project.scripts]
 codepilot = "codepilot.cli:main"
